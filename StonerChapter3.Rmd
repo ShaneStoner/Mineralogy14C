@@ -1,0 +1,2949 @@
+---
+title: "ThermalMinCh3"
+author: "Shane Stoner"
+date: "4/1/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r libraries and files, message = FALSE, warning=FALSE, include=FALSE}
+library(tidyr)
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(pcaMethods)
+library(ggbiplot)
+library(FactoMineR)
+library(missMDA)
+library(questionr)
+library(reshape2)
+library(SoilR)
+library(splines2)
+library(splines)
+library(zoo)
+library(DescTools)
+library(plotrix)
+library(weights)
+library(mpspline2)
+library(ISRaD)
+library(grid)
+library(gridExtra)
+library(sBIC)
+library(grid)
+library(mclust)
+library(sjstats)
+library(data.table)
+
+`%notin%` <- Negate(`%in%`) ### A nice tool for excluding
+
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/')
+
+### Lab notes and calculations
+isod <- drop_na(data.frame(read_xlsx('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/FractionNotesCalcs.xlsx', skip = 2)), Final.)
+isod <- isod %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz",
+                                              Sample.Name))))))))), ordered = TRUE))
+
+### Mineralogy Data
+minDat <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/Ch 3 Mineralogy - Data Table - Sheet1.csv')
+minDat %>% dplyr::filter(Sample.Name != "WE Spodosol") -> minDat
+minDat <- minDat %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz", 
+                                              Sample.Name)))))))))))
+### Compiled py-GC/MS
+py <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/Ch3MinpyGCMSlong.csv')
+
+py <- py %>% 
+  dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz",
+                                              Sample.Name))))))))), ordered = TRUE))
+
+py$Sample <- factor(py$Sample.Name.N, levels = c('SRO', 'CO + 1:1 Clay', "Quartz", "MiB1 Spodosol - Bulk", 
+                                               "Mixed Clay + Quartz", "1:1 Clay + Quartz",  "2:1 Clay + CO", "Mafic PM + CO", "Int. PM + SRO"), ordered = TRUE)
+py <- py[order(py$Sample),]
+
+pyMin <- data.frame(Sample = py[match(unique(py$Sample), py$Sample),],
+                    Mineralogy = factor(c('SRO', "Cryst.", "(Oxy)hydroxides",
+                      "", "1:1 Clay ≈ 2:1 Clay", "1:1 Clay > 2:1 Clay", "2:1 Clay + Oxides", 
+                      "1:1 Clay + Cryst.", "2:1 Clay + SRO"), ordered = TRUE))
+
+#pyMin <- full_join(data.frame(Sample = py[match(unique(py$Sample), py$Sample),]), isod, by = c("Sample.Sample" = "Sample.Name.N"))
+
+### Depth profiles for depth-correcting 14C
+d14 <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/DepthCorr14C.csv')
+
+d14 <- d14 %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                       ifelse(Sample == "MiB1 Spodosol", "Quartz",
+                                              Sample))))))))
+
+### Colors and shapes for plotting
+
+MinCols <- c(
+  `Quartz` = '#969696',
+  `Int. PM + SRO` = "#6baed6",
+  `Felsic PM + Mixed Clay` = "#3182bd",
+  `Mafic PM + CO` = "#084594",
+  `SRO` = "#fb9a99",
+  `CO + 1:1 Clay` =  "#e31a1c",
+  `2:1 Clay + CO` = "#66c2a4",
+  `Mixed Clay + Quartz` = "#2ca25f",
+  `1:1 Clay + Quartz` = "#006d2c"
+)
+
+MinShapes <- c(
+  `Quartz` = 18,
+  `Int. PM + SRO` = 17,
+  `Felsic PM + Mixed Clay` = 17,
+  `Mafic PM + CO` = 17,
+  `SRO` = 15,
+  `CO + 1:1 Clay` = 15,
+  `2:1 Clay + CO` = 16,
+  `Mixed Clay + Quartz` = 16,
+  `1:1 Clay + Quartz` = 16
+)
+
+weathOrg <- c("Quartz",
+              "Int. PM + SRO",
+              "Mafic PM + CO",
+              "Felsic PM + Mixed Clay",
+              "1:1 Clay + Quartz",
+              "Mixed Clay + Quartz",
+              "2:1 Clay + CO",
+              "SRO",
+              "CO + 1:1 Clay"
+              )
+
+```
+
+```{r Fmdist function, echo=FALSE}
+
+FmDist <- function(sample, ramp, bulkFm = bulkFm, FmTemp = FmTemp, dfn = 3, reso = 0.1, mp_temps = NA, all.plots = FALSE){
+  library(splines2)
+  library(splines)
+  library(zoo)
+  library(DescTools)
+  library(ggplot2)
+  library(plotrix)
+  library(weights)
+  library(mpspline2)
+  library(ISRaD)
+  library(grid)
+  library(gridExtra)
+  library(dplyr)
+  
+  #For grabbing measured mean Fm
+  isod <- drop_na(data.frame(read_xlsx('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/FractionNotesCalcs.xlsx', skip = 2)), Final.)
+  isod <- isod %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample.Name)))))))))))
+
+  d14 <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/DepthCorr14C.csv')
+  d14 <- d14 %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample)))))))))))
+  
+  len_ramp <- which(ramp$temp == 775)
+  
+  ### Grab only relevant data with new RPO smoothing outputs
+  ramp <- ramp[1:len_ramp,]
+  ramp$CO2_prop = ramp$Moving / max(ramp$Moving, na.rm = TRUE)
+  
+  par(mfrow = c(1,1))
+  ###Thermogram
+  #Temperature ramp, with intervals for interpolation = reso (default = 0.1)
+  ht = seq(100, 775, by = reso)
+  rsp <- spline(ramp$temp, ramp$CO2_prop, xout = ht)
+  
+  ### Radiocarbon
+  #B spline
+  summary(B_fm1 <- lm(bulkFm ~ bs(FmTemp)))
+  #Natural cubic spline
+  summary(NCub_fm <- lm(bulkFm ~ ns(FmTemp)))
+  
+  #Cubic Spline
+  CubFit <- interpSpline(bulkFm ~ FmTemp)
+  #Linear Interpolation
+  FmTempl = c(100, FmTemp, max(ramp$temp)) #Assuming flat 14C change past constraint points
+  bulkFml = c(bulkFm[1], bulkFm, bulkFm[length(bulkFm)]) #Build out Fm vector to create flat lines
+  Lfit <- approx(FmTempl, bulkFml, n = length(ht))
+  #Mass Preserving Spline
+  # Fitting mass-preserving spline all the way to the end of the data series weights the first and last fraction unnaturally,
+  # so we'll find the temp where 1% & 99% of the C has been released and constrain there
+  maxtemp <- max(ramp$temp)
+  
+  frac1 = AUC(ramp$temp, ramp$Moving, from = 100, to = mp_temps$Thigh[1], method = 'spline', subdivisions = 2000) / 1000
+  tRange = seq(80, mp_temps$Thigh[1])
+  a = 0
+  for(i in tRange){
+    if(a < frac1){
+      a <- AUC(ramp$temp, ramp$Moving, from = 100, to = i, method = 'spline', subdivisions = 500)
+      temp1 = i
+    }
+  }
+  
+  frac99 =(AUC(ramp$temp, ramp$Moving, from = mp_temps$Tlow[length(mp_temps$Tlow)], to = mp_temps$Thigh[length(mp_temps$Thigh)],
+               method = 'spline', subdivisions = 2000)) - (AUC(ramp$temp, ramp$Moving,
+                                                               from = mp_temps$Tlow[length(mp_temps$Tlow)], to = mp_temps$Thigh[length(mp_temps$Thigh)],
+                                                               method = 'spline', subdivisions = 2000) / 1000)
+  tRange = seq(mp_temps$Tlow[length(mp_temps$Tlow)], to = mp_temps$Thigh[length(mp_temps$Thigh)])
+  a = 0
+  for(i in tRange){
+    if(a < frac99){
+      a <- AUC(ramp$temp, ramp$Moving, from = mp_temps$Tlow[length(mp_temps$Tlow)], to = i, method = 'spline', subdivisions = 500)
+      temp99 = i
+    }
+  }
+  
+  if(temp1 < 100) temp1 = 100
+  if(temp99 > 675) temp99 = 675
+  
+  mp <- data.frame(Sample = "sample",
+                   ltemp = c(temp1, mp_temps[,1][2:length(mp_temps[,1])]),
+                   htemp = c(mp_temps[1:length(mp_temps[,2])-1,2], temp99),
+                   bulkFm)
+  
+  # Old mp, with max and min as default (poor fit of 1st and last fractions with MPspline)
+  # mp <- data.frame(Sample = "sample",
+  #                  ltemp = c(100, mp_temps[,1][2:length(mp_temps[,1])]),
+  #                  htemp = mp_temps[,2],
+  #                  bulkFm)
+  
+  #Initialize dataframe
+  frame_sp <- data.frame(ht, ht, ht, ht, ht, ht, ht)
+  colnames(frame_sp) <- c('Temp', 'Area', 'B_Fm', 'Cub_Fm', "L_Fm", "NCub_Fm", "MPS_Fm")
+  #Calculate total area under curve
+  totAUC <- AUC(ht, rsp$y, method = 'spline', subdivisions = length(ht))
+  
+  Area <- ht
+  n = 1
+  cond = c(rep(TRUE, length(ht)-1), FALSE)
+  for(t in ht){
+    if(cond[n]){
+      Area[n] <- AUC(ht, rsp$y, from = t, to = ht[n+1], method = 'spline') / totAUC
+    } else {
+      Area[n] <- AUC(ht, rsp$y, from = t, to = ht[n], method = 'spline') / totAUC
+    }
+    
+    #frame_sp$Cub_Fm[n] <- predict(CubFit, t)$y
+    #frame_sp$L_Fm[n] <- Lfit$y[n]
+    n = n+1
+    if(n %% 2000 == 0) print(paste("Interpolation", round(n/length(ht) * 100, 1), "percent finished."))
+  }
+  
+  frame_sp$Area <- Area
+  
+  #frame_sp$Area[length(frame_sp$Area)] = 0
+  frame_sp$Cub_Fm <- spline(y = bulkFm, x= FmTemp, method = 'fmm', xout = frame_sp$Temp)$y #Doesn't make much sense for extrapolation but here it is
+  frame_sp$L_Fm <- Lfit$y
+  frame_sp$B_Fm = predict(B_fm1, data.frame(FmTemp=frame_sp$Temp)) #B spline fit
+  #frame_sp$NCub_Fm = predict(NCub_fm, data.frame(FmTemp=frame_sp$Temp)) #Natural Cubic spline fit
+  frame_sp$NCub_Fm = spline(y = bulkFm, x= FmTemp, method = 'natural', xout = frame_sp$Temp)$y
+  
+  # mpspline can only use integers, so we'll fit a finer spline to it
+  mp.sp <- mpspline(mp, d = seq(99, 775))
+  #frame_sp$MPS_Fm = approx(seq(100,len_ramp), mp.sp$sample$est_dcm, xout = ht)$y
+  #frame_sp$MPS_Fm <- zoo::na.fill(frame_sp$MPS_Fm, fill = frame_sp$MPS_Fm[101]) ### Fill 99-100 with 100-101 values
+  
+  frame_sp$MPS_Fm <- na.approx(mp.sp$sample$est_1cm, xout = seq(100, 775,by=reso), rule = 2)
+  
+  # plot(seq(1,len_ramp), mp.sp$sample$est_1cm, type = 'l', lwd =3)
+  # lines(frame_sp$Temp, frame_sp$MPS_Fm, lwd = 2, col = 'red')
+  
+  par(mfrow = c(1,1))
+  
+  #Plot 14C interpolations and thermograms
+  plot(frame_sp$Temp, frame_sp$Area, type = 'l', lwd = 3, col = 'steelblue',
+       xlab = 'Temperature', ylab = 'Total Area',
+       main = sample)
+  par(new = T)
+  plot(frame_sp$Temp, frame_sp$B_Fm, type = 'l', lwd = 1.5, col = 'coral', yaxt = 'n',
+       ylab = '', xlab = '',
+       ylim = c(max(0.1, min(frame_sp[,2:6])), min(1.2, max(frame_sp[,2:6]))))
+  lines(frame_sp$Temp, frame_sp$Cub_Fm, col = 'cyan4', lwd = 1.5)
+  lines(Lfit, col = 'purple')
+  lines(frame_sp$Temp, frame_sp$NCub_Fm, col = 'darkgreen', lwd = 1.5)
+  lines(frame_sp$Temp, frame_sp$MPS_Fm, col = "black", lty = 2, lwd =1.5)
+  points(FmTemp, bulkFm, pch = 21, bg = 'blue')
+  axis(side = 4)
+  mtext(side = 4, 'Fm')
+  legend('bottomleft', legend = c('B Spline', 'Cubic Spline', 'Linear', "Nat. Cubic", "MP Spline", 'Thermogram',"14C Data"),
+         lty = c(1,1,1,1,2,1,NA), col = c('coral', 'cyan4', 'purple','darkgreen', 'black', 'steelblue','black'),
+         #bg = c(1,1,1),
+         pch = c(NA, NA,NA,NA,NA, NA,21),
+         lwd = 2, cex = 0.7)
+  
+  #Histograms for outputs
+  par(mfrow = c(2,1))
+  breaks <- seq(from = 0.0, to = 2, length.out = 1000)
+  
+  if(all.plots) hist(frame_sp$L_Fm, main ='Linear Interpolation, Unweighted', freq = FALSE)
+  LinHist <- weighted.hist(frame_sp$L_Fm, frame_sp$Area, freq = FALSE, xlim = c(0.5, 1.5),
+                           main = 'Linear Interpolation, Weighted', breaks = breaks, plot = ifelse(all.plots, TRUE, FALSE))
+  
+  if(all.plots) hist(frame_sp$B_Fm, main = 'B Spline, Unweighted', freq = FALSE)
+  BHist <- weighted.hist(frame_sp$B_Fm, frame_sp$Area, freq= FALSE, xlim = c(0.5, 1.5),
+                         main = 'B Spline, Weighted', breaks = breaks, plot = ifelse(all.plots, TRUE, FALSE))
+  
+  if(all.plots) hist(frame_sp$Cub_Fm, main ='Cubic Spline, Unweighted', freq = FALSE)
+  CubHist <- weighted.hist(frame_sp$Cub_Fm, frame_sp$Area, freq = FALSE, xlim = c(0.5, 1.5),
+                           main = 'Cubic Spline, Weighted', breaks = breaks, plot = ifelse(all.plots, TRUE, FALSE))
+  
+  if(all.plots) hist(frame_sp$NCub_Fm, main = 'Natural Cubic Spline, Unweighted', freq=FALSE)
+  NCubHist <- weighted.hist(frame_sp$NCub_Fm, frame_sp$Area, freq = FALSE, xlim = c(0.5, 1.5),
+                            main = 'Natural Cubic Spline, Weighted', breaks = breaks, plot = ifelse(all.plots, TRUE, FALSE))
+  
+  if(all.plots) hist(frame_sp$MPS_Fm, main = 'Mass-Preserving Spline, Unweighted', freq=FALSE)
+  MPHist <- weighted.hist(frame_sp$MPS_Fm, frame_sp$Area, freq = FALSE, xlim = c(0.5, 1.5),
+                          main = 'Mass-Preserving Spline, Weighted', breaks = breaks, plot = ifelse(all.plots, TRUE, FALSE))
+  
+  if(all.plots){
+  par(mfrow = c(1,1))
+  plot(ramp$temp, ramp$Moving, type = 'l', lwd = 3, xlim = c(150, len_ramp), main = paste(sample, ":: Mass-preserving spline fit"))
+  par(new = T)
+  plot(FmTemp, bulkFm, ylim = c(.6, 1.12), axes = F, ann = F, xlim = c(150, len_ramp), pch = 16, col = 'steelblue',cex = 1.5)
+  for(i in 1:6){
+    x0v = mp_temps[,1][i]
+    y0h = 0
+    x1b = mp_temps[,2][i]
+    y1b = mp[,4][i]
+    if(i == 1 ){
+      segments(x0 = x1b, y0 = y0h, x1 = x1b, y1 = y1b, col = 'brown2', lwd = 4)
+      segments(x0 = 100, y0 = y1b, x1 = x1b, y1 = y1b, col = 'brown2', lwd = 4)
+    } else {
+      x0h = mp[,3][i-1]
+      segments(x0 = x1b, y0 = y0h, x1 = x1b, y1 = y1b, col = 'brown2', lwd = 4)
+      segments(x0 = x0h, y0 = y1b, x1 = x1b, y1 = y1b, col = 'brown2', lwd = 4)
+      segments(x0 = x0h, y0 = y1b, x1 = x0v, y1 = y0h, col = 'brown2', lwd = 4)
+    }
+  }
+  lines(frame_sp$Temp, frame_sp$MPS_Fm, lty = 2, lwd = 3, col = 'darkgreen')
+  }
+  
+  ##Plot those distributions
+  Cubstats <- c(wtd.quantile(frame_sp$Cub_Fm, weights = frame_sp$Area,
+                             normwt = TRUE, probs = c(0.1, 0.25, 0.5, 0.75, 0.9)),
+                wmean = wtd.mean(frame_sp$Cub_Fm, weight = frame_sp$Area))
+  Linstats <- c(wtd.quantile(frame_sp$L_Fm, weights = frame_sp$Area,
+                             normwt = TRUE, probs = c(0.1, 0.25, 0.5, 0.75, 0.9)),
+                wmean = wtd.mean(frame_sp$L_Fm, weight = frame_sp$Area))
+  Bstats <- c(wtd.quantile(frame_sp$B_Fm, weights = frame_sp$Area,
+                           normwt = TRUE, probs = c(0.1, 0.25, 0.5, 0.75, 0.9)),
+              wmean = wtd.mean(frame_sp$B_Fm, weight = frame_sp$Area))
+  NCubstats <- c(wtd.quantile(frame_sp$NCub_Fm, weights = frame_sp$Area,
+                              normwt = TRUE, probs = c(0.1, 0.25, 0.5, 0.75, 0.9)),
+                 wmean = wtd.mean(frame_sp$NCub_Fm, weight = frame_sp$Area))
+  MPstats <- c(wtd.quantile(frame_sp$MPS_Fm, weights = frame_sp$Area,
+                            normwt = TRUE, probs = c(0.1, 0.25, 0.5, 0.75, 0.9)),
+               wmean = wtd.mean(frame_sp$MPS_Fm, weight = frame_sp$Area))
+  
+  xlim = c(max(min(Bstats, Linstats, Cubstats, NCubstats, MPstats),0.5) - 0.015,
+           min(max(Bstats, Linstats, Cubstats, NCubstats, MPstats), 1.5) + 0.015)
+  #Linear Interpolation
+  colz = c('#feb24c','#fd8d3c','#fc4e2a','#e31a1c','#b10026','#4a1486',"black")
+  if(all.plots){
+  print(ggplot(data = frame_sp) +
+          geom_vline(xintercept = Linstats, lty = 2) + theme_bw() +
+          geom_freqpoly(bins = 200, aes(x = L_Fm, y=..density.., weight = Area),
+                        colour="black", fill="white") +
+          geom_density(aes(x = L_Fm, y=..density.., weight = abs(frame_sp$Area),fill="#FF6666"),alpha = 0.2) +
+          xlim(xlim) +
+          ggtitle(paste(sample, ':: Linear Spline Distribution')) + xlab('Fraction Modern') +
+          geom_label(aes(x = Linstats, y = 0.7), data = data.frame(names(Linstats)), label =  names(Linstats), size = 2))
+  
+  #B Spline
+  print(ggplot(data = frame_sp) +
+          geom_vline(xintercept = Bstats, lty = 2) + theme_bw() +
+          geom_freqpoly(bins = 200, aes(x = B_Fm, y=..density.., weight = Area),
+                        colour="black", fill="white") +
+          geom_density(aes(x = B_Fm,y=..density.., weight = abs(frame_sp$Area),fill="#FFFF66"),alpha = 0.2) +
+          xlim(xlim) +
+          ggtitle(paste(sample, ':: B Spline Distribution')) + xlab('Fraction Modern') +
+          geom_label(aes(x = Bstats, y = 0.7), data = data.frame(names(Bstats)), label =  names(Bstats), size = 2))
+  
+  #Cubic Spline
+  print(ggplot(data = frame_sp) +
+          geom_vline(xintercept = Cubstats, lty = 2) + theme_bw() +
+          geom_freqpoly(bins = 200, aes(x = Cub_Fm, y=..density.., weight = Area),
+                        colour="black", fill="white") +
+          geom_density(aes(x = Cub_Fm,y=..density.., weight = abs(frame_sp$Area),fill="#FF6666"),alpha = 0.2) +
+          xlim(xlim) +
+          ggtitle(paste(sample, ':: Cubic Spline Distribution')) + xlab('Fraction Modern') +
+          geom_label(aes(x = Cubstats, y = 0.7), data = data.frame(names(Cubstats)), label =  names(Cubstats), size = 2))
+  
+  #Natural Cubic Spline
+  print(ggplot(data = frame_sp) +
+          geom_vline(xintercept = NCubstats, lty = 2) + theme_bw() +
+          geom_freqpoly(bins = 200, aes(x = NCub_Fm, y=..density.., weight = Area),
+                        colour="black", fill="white") +
+          geom_density(aes(x = NCub_Fm,y=..density.., weight = abs(frame_sp$Area),fill="#FF6666"),alpha = 0.2) +
+          xlim(xlim) + theme_bw() +
+          ggtitle(paste(sample, ':: Natural Cubic Spline Distribution')) + xlab('Fraction Modern') +
+          geom_label(aes(x = NCubstats, y = 0.7), data = data.frame(names(NCubstats)), label =  names(Cubstats), size = 2))
+  
+  #Mass-preserving Spline
+  print(ggplot(data = frame_sp) +
+          geom_vline(xintercept = MPstats, lty = 2) + theme_bw() +
+          geom_freqpoly(bins = 200, aes(x = MPS_Fm, y=..density.., weight = Area),
+                        colour="black", fill="white") +
+          geom_density(aes(x = MPS_Fm,y=..density.., weight = abs(frame_sp$Area),fill="#FF6666"),alpha = 0.2) +
+          xlim(xlim) + theme_bw() +
+          ggtitle(paste(sample, ':: Mass-Preserving Spline Distribution')) + xlab('Fraction Modern') +
+          geom_label(aes(x = MPstats, y = 0.7), data = data.frame(names(MPstats)), label =  names(MPstats), size = 2))
+  }
+  #All splines overlain (Density)
+  xlim = c(xlim[1] - 0.005, xlim[2] + 0.005)
+  bins = 200
+  
+  print(ggplot(data=frame_sp) +
+          geom_freqpoly(bins = bins, aes(x = L_Fm, y = ..density.., weight = abs(Area),color="#FF6666"),alpha = 1) +
+          geom_freqpoly(bins = bins, aes(x = B_Fm, y = ..density.., weight = abs(Area),color="#FFFF66"),alpha = 1) +
+          geom_freqpoly(bins = bins, aes(x = Cub_Fm, y = ..density.., weight = abs(Area),color="#FF66FF"),alpha = 1) +
+          geom_freqpoly(bins = bins, aes(x = NCub_Fm, y = ..density.., weight = abs(Area),color="#6666FF"),alpha = 1) +
+          geom_freqpoly(bins = bins, aes(x = MPS_Fm, y = ..density.., weight = abs(Area),color="steelblue2"),alpha = 1) +
+          xlim(xlim) + theme_bw() +
+          ggtitle(paste(sample, ':: Weighted Histogram Polygons')) +
+          scale_color_discrete(name = "Fit", labels = c("Linear", "Cubic", "B Spline", "Nat. Cubic", "Mass-Preserving")))
+  
+  #All splines overlain (Histograms)
+  # par(mfrow = c(1,1))
+  # plot(FmTemp, bulkFm, pch = 21, bg = 'blue', ylab = 'Fm',
+  #      ylim = c(0.5, max(bulkFm, frame_sp$B_Fm, frame_sp$Cub_Fm, frame_sp$L_Fm)),
+  #      xlim = c(min(frame_sp$Temp), max(frame_sp$Temp)))
+  # par(new = T)
+  # plot(frame_sp$Temp, frame_sp$Area, type = 'l', lwd = 3, col = 'steelblue', xlab = '', ylab = '',
+  #      main = sample, yaxt = 'n')
+  # par(new = T)
+  # plot(frame_sp$Temp, frame_sp$B_Fm, type = 'l', lwd = 1.5, col = 'coral', yaxt = 'n', ylab = '', xlab = '',
+  #      ylim = c(0.5, max(bulkFm, frame_sp$B_Fm, frame_sp$Cub_Fm, frame_sp$L_Fm)))
+  # lines(frame_sp$Temp, frame_sp$Cub_Fm, col = 'cyan4', lwd = 1.5)
+  # lines(Lfit, col = 'purple', lwd = 1.5)
+  # lines(frame_sp$Temp, frame_sp$NCub_Fm, col = 'darkgreen', lwd = 1.5)
+  # lines(frame_sp$Temp, frame_sp$MPS_Fm, col = 'black', lty = 2, lwd = 1.5)
+  # axis(side = 4)
+  # mtext(side = 2, 'Fm')
+  # legend('topright', legend = c('B Spline', 'Cubic Spline', 'Linear', "Nat. Cubic", "MP Spline", 'Thermogram',"14C Data"),
+  #        lty = c(1,1,1,1,2,1,NA), col = c('coral', 'cyan4', 'purple','darkgreen', 'black', 'steelblue','black'),
+  #        #bg = c(1,1,1),
+  #        pch = c(NA, NA,NA,NA,NA, NA,21),
+  #        lwd = 2, cex = 0.7)
+  
+  ### Compare stats against measured means
+  convert_fm_d14c <- function(fm = NA, d14c = NA, obs_date_y, verbose = TRUE) {
+    lambda <- 0.00012097
+    if (is.na(d14c)) {
+      if (verbose) {
+        message("calculating ", "\u0394", "14C from fraction modern")
+      }
+      (fm * exp(lambda * (-obs_date_y + 1950)) - 1) * 1000
+    } else if (is.na(fm)) {
+      if (verbose) {
+        message("calculating fraction modern from ", paste0("\u0394", "14C"))
+      }
+      ((d14c / 1000) + 1) / exp(lambda * (-obs_date_y + 1950))
+    }
+  }
+  
+  isod %>% 
+    dplyr::filter(Sample.Name.N == sample & !is.na(Bulk.14C)) %>% 
+    dplyr::select(Bulk.14C) %>% as.numeric() %>%
+    convert_fm_d14c(d14c = ., obs_date_y = max(unique(d14 %>% 
+                                                    dplyr::filter(Sample.Name.N == sample) %>% 
+                                                    dplyr::select(obs_date_y)))) %>% as.numeric() -> measFm
+  
+  q <- data.frame(
+    round(measFm, 4),
+    round(Linstats[6] - measFm, 4),
+    round(Cubstats[6] - measFm, 4),
+    round(NCubstats[6] - measFm, 4),
+    round(Bstats[6] - measFm, 4),
+    round(MPstats[6] - measFm, 4)
+  )
+  
+  colnames(q) <- c("Measured", "Linear", "Cubic", "Nat. Cubic", "B Spline", "MP Spline")
+  plot.new()
+  pvp = viewport(x = .5, y = .3)
+  pushViewport(pvp)
+  grid.text("Difference in mean Fm", x=.5, y = .8)
+  grid.table(q)
+  #grid.text(samplesize, x=.9, y = .55)
+  
+  print(ggplot(data=frame_sp) +
+          geom_density(aes(x = L_Fm, y = ..density.., weight = abs(Area),color="#FF6666"),alpha = 0.5, lwd =1.2) +
+          geom_density(aes(x = B_Fm, y = ..density.., weight = abs(Area),color="#FFFF66"),alpha = 0.5, lwd =1.2) +
+          geom_density(aes(x = Cub_Fm, y = ..density.., weight = abs(Area),color="#FF66FF"),alpha = 0.5, lwd = 1.2) +
+          geom_density(aes(x = NCub_Fm, y = ..density.., weight = abs(Area),color="#6666FF"),alpha = 0.5, lwd = 1.2) +
+          geom_density(aes(x = MPS_Fm, y = ..density.., weight = abs(Area),color="steelblue2"),alpha = 0.5, lwd = 1.2) +
+          xlim(xlim) + xlab("Fm") + theme_bw() +
+          ggtitle(paste(sample, ':: Weighted Densities')) +
+          scale_color_discrete(name = "Fit", labels = c("Linear", "Cubic", "B Spline", "Nat. Cubic", "MP Spline")))
+  
+  # print("Linear, B, Cubic")
+  # print(Linstats)
+  # print(Bstats)
+  # print(Cubstats)
+  return(list(data.frame(sample, Linstats, Bstats, Cubstats, NCubstats, MPstats),
+              data.frame(sample, MidFm = breaks,
+                         Lin = c(0,LinHist$density),
+                         B = c(0,BHist$density),
+                         Cub = c(0,CubHist$density),
+                         NCub = c(0,NCubHist$density),
+                         MPS = c(0,MPHist$density),
+                         LinDens = density(LinHist$density, n = 1000)$y,
+                         BDens = density(BHist$density, n = 1000)$y,
+                         CubDens = density(CubHist$density, n = 1000)$y,
+                         NCubDens = density(NCubHist$density, n = 1000)$y,
+                         MPSDens = density(MPHist$density, n = 1000)$y
+              ),
+              data.frame(Area = frame_sp$Area,
+                         L_Fm = frame_sp$L_Fm,
+                         B_Fm = frame_sp$B_Fm,
+                         Cub_Fm = frame_sp$Cub_Fm,
+                         NCub_Fm = frame_sp$NCub_Fm,
+                         MPS_Fm = frame_sp$MPS_Fm)))
+}
+
+```
+
+```{r FractionSizes function, echo=FALSE, message=FALSE}
+
+FractionSizes <- function(csv = NA, perC = 2, reqmgC = 0.5, temps_in = c(250, 300, 350, 450), dilution = 2){
+
+library(sBIC)
+library(grid)
+library(gridExtra)
+library(mclust)
+library(DescTools)
+library(questionr)
+library(sjstats)
+
+par(mfrow = c(2,1))
+
+if(is.data.frame(csv)){
+  csvlist = c("dataframe")
+} else {
+if(!is.na(csv)){
+  csvlist = csv
+} else {
+  csvlist = list.files(pattern="*.csv")
+  for (i in 1:length(csvlist)) assign(csvlist[i], read.csv(csvlist[i]))
+  titles=c()
+
+  for (i in (csvlist)){
+    t<- i
+    titles <- c(titles,t)
+  }
+}
+}
+
+for (f in csvlist) {
+  f_name = f[1]
+  f_name = substr(f_name, 1, 7)
+  if (f_name[1:7][1] == "smooth8") {
+  }
+  else {
+    if(is.data.frame(csv)) dat = ramp else dat <- read.csv(f)
+    cat("Currently analysing", f, "\n")
+    #Compute medians and averages, and format dataframe
+    datclip <- data.frame(dat$temp, dat$CO2_scaled, dat$CO2_scaled, dat$CO2_scaled, dat$CO2_scaled, dat$CO2_scaled,dat$CO2_scaled)
+    datclip <- na.omit(datclip)
+    datclip <- aggregate(dat$CO2_scaled, by=list(Temp_av = dat$temp), FUN=mean)
+
+    colnames(datclip)[2] <- "CO2_av"
+
+    maxtemp <- max(datclip$Temp_av)
+    temps <- c(temps_in, maxtemp) #To establish upper limit
+
+    title <- unlist((strsplit(f, '/')))[length(unlist(strsplit(f,'/')))]
+
+    fil = 20
+    fil_CO2 <- stats::filter(datclip$CO2_av, sides=2, rep(1/fil,fil))
+    datclip$fil_CO2 <-fil_CO2
+    datclip$CO2_scaled <- datclip$fil_CO2
+
+    plot(datclip$Temp_av, datclip$fil_CO2, col="steelblue4", type='l', lwd=4, main=title,
+         xlab="Temp. (C)", ylab="CO2 (IR Detector)", xlim = c(100,650), xaxp = c(100, 700, 12)) #True data
+
+
+    sp_fun <- splinefun(datclip$Temp_av, datclip$CO2_av, method='fmm')
+    tol = 1.5e-4 * 2
+    arealist <- list()
+    l=1
+    u=1
+    for (i in temps) {
+      if (u==1){
+        lower <- 100
+        upper <- temps[u]
+        u <- u+1
+      } else {
+        lower <- temps[l]
+        upper <- temps[u]
+        u <- u+1
+        l <- l+1
+      }
+      area <- integrate(sp_fun, lower, upper, subdivisions = 8000, rel.tol = tol)
+      #area <- round(arearaw, 2)
+      arealist <- c(arealist, area[1])
+    }
+
+    ### CO2 - modelled fit
+    sp_fun <- splinefun(datclip$Temp_av,datclip$CO2_av, method='fmm')
+
+    area_un <- unlist(arealist)
+    maxtemp <- max(datclip$Temp_av)
+    totalarea <- integrate(sp_fun, 80, maxtemp, subdivisions=8000, rel.tol = tol)[1]
+    totalarea_int <- as.numeric(unlist(totalarea))
+
+    #temps <- c(220, 310, 400, 500)  #User-defined
+    tempclipmax <- max(datclip$Temp_av)
+
+
+    #Calculate total area the right way
+    sp_fun <- splinefun(datclip$Temp_av, datclip$CO2_av, method='fmm')
+    totalarea <- integrate(sp_fun, 80, tempclipmax, subdivisions = 10000, rel.tol = tol)[1]
+    totalarea_int <- as.numeric(unlist(totalarea))
+    fractions <- c()
+    abline(,,,80, col = 'brown3', lwd = 1.5)
+    for (y in 1:length(temps)) {
+      thistemp <- temps[y]
+      abline(,,,thistemp, col = 'brown3',lwd = 1.5)
+      CO2area <- 0
+      if (y==1) {
+        CO2area_int <- integrate(sp_fun, 80, temps[y], subdivisions = 10000, rel.tol = tol)[1]
+        CO2area <- as.numeric(unlist(CO2area_int))
+        fracproportion <- CO2area / totalarea_int
+        cat("Between 0 and", thistemp, "degrees C the proportion of sample C is", fracproportion, "\n")
+        fractions <- c(fractions, fracproportion)
+      }
+      else {
+        templower <- temps[y-1]
+        CO2area_int <- integrate(sp_fun, templower, temps[y], subdivisions = 8000, rel.tol = tol)[1]
+        CO2area <- as.numeric(unlist(CO2area_int))
+        fracproportion <- CO2area / totalarea_int
+        cat("Between", templower, "and", thistemp, "degrees C the proportion of sample C is", fracproportion, "\n")
+        fractions <- c(fractions, fracproportion)
+      }
+    }
+
+
+    #Calculate mid-point temperature for spline distributions
+    maxtemp <- max(datclip$Temp_av)
+    temps <- c(temps_in, maxtemp) #To establish upper limit
+    midlist <- c()
+
+    for(x in 1:length(temps)){
+      if(x == 1){
+        frac50 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = temps_in[x], method = 'spline', subdivisions = 2000) / 2
+        tRange = seq(80,temps_in[x])
+        a = 0
+        for(i in tRange){
+          if(a < frac50){
+            a <- AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = i, method = 'spline', subdivisions = 500)
+            midT = i
+          }
+        }
+        midlist <- c(midT)
+      }
+      else {
+        frac50 = AUC(datclip$Temp_av, datclip$CO2_av, from = temps[x-1], to = temps[x], method = 'spline') / 2
+        tRange = seq(temps[x-1],temps[x])
+        a = 0
+        for(i in tRange){
+          if(a < frac50){
+            a <- AUC(datclip$Temp_av, datclip$CO2_av, from = temps[x-1], to = i, method = 'spline')
+            midT = i
+          }
+        }
+        midlist = c(midlist, midT)
+      }
+    }
+
+    Tstats = c()
+
+    for(i in c(0.1,0.25,0.5,0.75,0.9)){
+      fracT = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * i
+      tRange = seq(80,800)
+      a = 0
+      for(j in tRange){
+        if(a < fracT){
+          a <- AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = j, method = 'spline', subdivisions = 500)
+          midT = j
+        }
+      }
+      Tstats = c(Tstats, midT)
+    }
+
+    Tstats = c(Tstats,
+               round(wtd.mean(datclip$Temp_av, weights = datclip$CO2_av)),
+               round(wtd_sd(datclip$Temp_av, weights = datclip$CO2_av),2))
+
+    # Tstats = c(frac10 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * 0.1,
+    #            frac25 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * 0.25,
+    #            frac50 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * 0.5,
+    #            frac75 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * 0.75,
+    #            frac90 = AUC(datclip$Temp_av, datclip$CO2_av, from = 80, to = 800, method = 'spline', subdivisions = 2000) * 0.9)
+
+    abline(,,,midlist, lwd = 1.5, lty = 2, col = 'orange')
+
+    ### Construct table
+    fractions <- round(fractions, 3)
+    mgsample <- toString(round(reqmgC * (1/ min(fractions)) * (100/perC)))
+    dilute <- round((as.numeric(mgsample) * (perC / dilution) - as.numeric(mgsample)), 0)
+    q <- data.frame(temps, fractions, midlist)
+    if(perC > 2){
+    samplesize <- paste0("Sample contains ", perC, "% C.\n",
+                        "In order to collect ",
+                        reqmgC, " mg C\n in the smallest fraction,\n",
+                        mgsample, " mg sample required.\n",
+                        "Dilute with ", dilute, " g sand\n",
+                        'to reach target % C of ', dilution, ".")
+    } else {
+      samplesize <- paste0("Sample contains ", perC, "% C.\n",
+                           "In order to collect ",
+                           reqmgC, " mg C\n in the smallest fraction,\n",
+                           mgsample, " mg sample required.")
+    }
+    colnames(q) <- c("Temp.", "Frac. Prop", "50th-Temp")
+    percTable <- matrix(, nrow = length(temps), ncol=2)
+    pvp = viewport(x = .3, y = .3)
+    pushViewport(pvp)
+    grid.table(q)
+    grid.text(samplesize, x=.9, y = .55)
+    plot.new()
+
+    return(list(q, stats = data.frame(Perc = c(0.1, 0.25, 0.5, 0.75, 0.9, "Mean","SD"), stat = Tstats)))
+  }
+}
+}
+
+```
+
+```{r Fmdists, include = TRUE}
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/')
+
+#SA 776
+SA776_dist <- FmDist(sample = "1:1 Clay + Quartz",
+                  ramp = read.csv('smooth_SA 776 Frac_RPO.csv'),
+                  bulkFm = dplyr::filter(isod, Sample.Name.N == "1:1 Clay + Quartz")[,"Fm"],
+                  FmTemp = dplyr::filter(isod, Sample.Name.N == "1:1 Clay + Quartz")[,"Med_Temp"],
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "1:1 Clay + Quartz")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "1:1 Clay + Quartz")[,"H_Temp"]))
+
+#SA 742
+SA742_dist <- FmDist(sample = "Mixed Clay + Quartz",
+                  ramp = read.csv('smooth_SA 742_RPO.csv'),
+                  bulkFm = filter(isod, Sample.Name.N == "Mixed Clay + Quartz")[,"Fm"],
+                  FmTemp = filter(isod, Sample.Name.N == "Mixed Clay + Quartz")[,"Med_Temp"],
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "Mixed Clay + Quartz")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "Mixed Clay + Quartz")[,"H_Temp"]))
+
+#BSwf Sierra
+BS_dist <- FmDist(sample = "Felsic PM + Mixed Clay",
+                  ramp = read.csv('smooth_BSwf 20-30 Frac fix_RPO.csv'),
+                  bulkFm = dplyr::filter(isod, Sample.Name.N == "Felsic PM + Mixed Clay")[,"Fm"],
+                  FmTemp = dplyr::filter(isod, Sample.Name.N == "Felsic PM + Mixed Clay")[,"Med_Temp"],
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "Felsic PM + Mixed Clay")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "Felsic PM + Mixed Clay")[,"H_Temp"]))
+
+#ANwf Sierra
+AN_dist <- FmDist(sample = "Int. PM + SRO",
+       ramp = read.csv('smooth_ANwf MOM_RPO.csv'),
+       bulkFm = filter(isod, Sample.Name.N == "Int. PM + SRO")[,'Fm'],
+       FmTemp = filter(isod, Sample.Name.N == "Int. PM + SRO")[,'Med_Temp'],
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "Int. PM + SRO")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "Int. PM + SRO")[,"H_Temp"]))
+
+#GRwf Sierra
+GR_dist <- FmDist(sample = "Mafic PM + CO",
+                  ramp = read.csv('smooth_GRwf MOM_RPO.csv'),
+                  bulkFm = filter(isod, Sample.Name.N == "Mafic PM + CO")[,'Fm'],
+                  FmTemp = filter(isod, Sample.Name.N == "Mafic PM + CO")[,'Med_Temp'],
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "Mafic PM + CO")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "Mafic PM + CO")[,"H_Temp"]))
+
+#MiB1 Heavy
+#FractionSizes('smooth_MiB1 8 Heavy ReRun_RPO.csv', temps_in = c(250,320,355,395))
+MiHeavy_dist <- FmDist(sample = "Quartz",
+                  ramp = read.csv('smooth_MiB1 8 Heavy ReRun_RPO.csv'),
+                  bulkFm = filter(isod, Sample.Name.N == "Quartz")[,'Fm'],
+                  FmTemp = na.omit(filter(isod, Sample.Name.N == "Quartz")[,'Med_Temp']),
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "Quartz")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "Quartz")[,"H_Temp"]))
+
+#MiB1 Bulk
+FractionSizes('smooth_MiB1 8 Bulk ReRun_RPO.csv', temps_in = c(250,310,350,385))
+MiBulk_dist <- FmDist(sample = "MiB1 Spodosol - Bulk",
+                       ramp = read.csv('smooth_MiB1 8 Bulk ReRun_RPO.csv'),
+                       bulkFm = filter(isod, Sample.Name.N == "MiB1 Spodosol - Bulk")[,'Fm'],
+                       FmTemp = na.omit(filter(isod, Sample.Name.N == "MiB1 Spodosol - Bulk")[,'Med_Temp']),
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "MiB1 Spodosol - Bulk")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "MiB1 Spodosol - Bulk")[,"H_Temp"]))
+
+#Le4-1 1508
+#FractionSizes('smooth_Le4_1508_rerun_RPO.csv', temps_in = c(270, 370, 420, 470))
+Le4_dist <- FmDist(sample = "2:1 Clay + CO", #reso = 0.5,
+                      ramp = read.csv('smooth_Le4_1508_rerun_RPO.csv'),
+                      bulkFm = filter(isod, Sample.Name.N == "2:1 Clay + CO")[,'Fm'],
+                      FmTemp = na.omit(filter(isod, Sample.Name.N == "2:1 Clay + CO")[,'Med_Temp']),
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "2:1 Clay + CO")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "2:1 Clay + CO")[,"H_Temp"]))
+
+#LSAG 113
+#FractionSizes('smooth_LSAG113_RPO.csv', temps_in = c(200, 260, 370, 410))
+LSAG113_dist <- FmDist(sample = "CO + 1:1 Clay",
+                   ramp = read.csv('smooth_LSAG113_RPO.csv'),
+                   bulkFm = filter(isod, Sample.Name.N == "CO + 1:1 Clay")[,'Fm'],
+                   FmTemp = na.omit(filter(isod, Sample.Name.N == "CO + 1:1 Clay")[,'Med_Temp']),
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "CO + 1:1 Clay")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "CO + 1:1 Clay")[,"H_Temp"]))
+
+
+
+#LSAG 69
+#FractionSizes('smooth_LSAG 69_RPO.csv', temps_in = c(245, 320, 360, 405))
+LSAG69_dist <- FmDist(sample = "SRO",
+                       ramp = read.csv('smooth_LSAG 69_RPO.csv'),
+                       bulkFm = filter(isod, Sample.Name.N == "SRO")[,'Fm'],
+                       FmTemp = na.omit(filter(isod, Sample.Name.N == "SRO")[,'Med_Temp']),
+                  mp_temps = data.frame(Tlow = dplyr::filter(isod, Sample.Name.N == "SRO")[,"L_Temp"],
+                               Thigh =dplyr::filter(isod, Sample.Name.N == "SRO")[,"H_Temp"]))
+
+### Generate long file of all thermograms
+rbind(data.frame(read.csv('smooth_LSAG 69_RPO.csv'), Sample = "SRO"), 
+              data.frame(read.csv('smooth_LSAG113_RPO.csv'), Sample = "CO + 1:1 Clay"),
+              data.frame(read.csv('smooth_Le4_1508_rerun_RPO.csv'), Sample = "2:1 Clay + CO"),
+              data.frame(read.csv('smooth_MiB1 8 Heavy ReRun_RPO.csv'), Sample = "Quartz"),
+              data.frame(read.csv('smooth_GRwf MOM_RPO.csv'), Sample = "Mafic PM + CO"),
+              data.frame(read.csv('smooth_ANwf MOM_RPO.csv'), Sample = "Int. PM + SRO"),
+              data.frame(read.csv('smooth_BSwf 20-30 Frac fix_RPO.csv'), Sample = "Felsic PM + Mixed Clay"),
+              data.frame(read.csv('smooth_SA 742_RPO.csv'), Sample = "Mixed Clay + Quartz"),
+              data.frame(read.csv('smooth_SA 776 Frac_RPO.csv'), Sample = "1:1 Clay + Quartz")
+              ) %>% 
+  group_by(Sample) %>% 
+  dplyr::mutate(norm = Moving / max(Moving)) -> longtherm
+
+```
+
+```{r SmoothedFmDists, echo=FALSE}
+
+#Smoothed distributions around 0
+bind_rows(.id = 'sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "SRO" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay" = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>%
+  #dplyr::select(c(sample, MPS_Fm, Area)) %>%
+  group_by(sample) %>%
+  dplyr::mutate(wm = weighted.mean(NCub_Fm, Area)) %>%
+  ggplot(aes(x = NCub_Fm - wm, y = ..density.., color = sample, weight=abs(Area))) +
+    scale_color_manual(values = MinCols) + labs(color="") +
+    geom_density(size = 1.2, adjust = 1) +
+    theme_bw() + xlim(-0.12,0.12) +
+    theme(legend.position = 'bottom') +
+    ggtitle("Normalized Fm Distributions :: Natural Cubic Spline Interpolation") +
+    xlab('Distribution Normalized to Weighted Mean Fm') +
+    theme(axis.text = element_text(size =16),
+          axis.title = element_text(size =16),
+          legend.text = element_text(size = 9.5))
+
+#Smoothed distributions around 0
+bind_rows(.id = 'sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "SRO" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          "MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay" = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>%
+  #dplyr::select(c(sample, MPS_Fm, Area)) %>%
+  group_by(sample) %>%
+  dplyr::mutate(wm = weighted.mean(NCub_Fm, Area)) %>%
+  ggplot(aes(x = NCub_Fm - wm, y = ..density.., color = sample, weight=abs(Area))) +
+    scale_color_manual(values = MinCols) + labs(color="") +
+    geom_density(size = 1.2, adjust = 1) +
+    theme_bw() + xlim(-0.12,0.12) +
+    theme(legend.position = 'bottom') +
+    ggtitle("Normalized Fm Distributions :: Natural Cubic Spline Interpolation") +
+    xlab('Distribution Normalized to Weighted Mean Fm') +
+    theme(axis.text = element_text(size =16),
+          axis.title = element_text(size =16),
+          legend.text = element_text(size = 9.5))
+
+
+#Smoothed distributions for paper
+bind_rows(.id = 'Sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "SRO" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay"  = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>%
+  dplyr::mutate(group = ifelse(Sample %in% c("Felsic PM + Mixed Clay", "Int. PM + SRO", "Mafic PM + CO"), "Primary Mineral Dominated",
+                        ifelse(Sample %in% c("CO + 1:1 Clay", "SRO"), "Metal Oxide Dominated",
+                        ifelse(Sample %in% c("2:1 Clay + CO", "1:1 Clay + Quartz", "Mixed Clay + Quartz"), "Clay Dominated",
+                        ifelse(Sample %in% c("Quartz", "MiB1 Spodosol - Bulk"), "Quartz Sand Dominated",""))))) %>%
+  dplyr::filter(group %in% c('Primary Mineral Dominated', "Clay Dominated")) %>% 
+  #dplyr::select(c(sample, MPS_Fm, Area)) %>%
+  ggplot(aes(x = NCub_Fm, y = ..density.., color = Sample, weight=abs(Area))) +
+    geom_vline(xintercept = 1, linetype = 2, size = 1.3) +
+    scale_color_manual(values = MinCols) +
+    geom_density(size = 1.2) +
+    theme_bw() + xlim(0.7,1.1) +
+    theme(legend.position = 'right') +
+    ggtitle("Fm Distributions :: Natural Cubic Spline Interpolation") +
+    xlab('Radiocarbon (Fm)') + labs(color="") +
+    theme(axis.text = element_text(size =16),
+          axis.title = element_text(size =16),
+          legend.text = element_text(size = 9.5)) +
+  facet_wrap(~group, ncol = 1)
+
+```
+
+```{r Thermograms, echo = FALSE}
+
+bind_rows(.id = "Sample",
+          `Quartz` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_MiB1 8 Heavy ReRun_RPO.csv'),
+          `Int. PM + SRO` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_ANwf MOM_RPO.csv'),
+          `Mafic PM + CO` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_GRwf MOM_RPO.csv'),
+          `Felsic PM + Mixed Clay` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_BSwf 20-30 Frac fix_RPO.csv'),
+          `1:1 Clay + Quartz` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_SA 776 Frac_RPO.csv'),
+          `Mixed Clay + Quartz` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_SA 742_RPO.csv'),
+          `2:1 Clay + CO` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_Le4_1508_rerun_RPO.csv'),
+          `SRO` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_LSAG 69_RPO.csv'),
+          `CO + 1:1 Clay` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_LSAG113_RPO.csv')) %>%
+          #"Le4 Clay" = read.csv('smooth_Le4_1508_rerun_RPO.csv')) %>%
+  dplyr::mutate(group = ifelse(Sample %in% c("Felsic PM + Mixed Clay", "Int. PM + SRO", "Mafic PM + CO"), "Primary Mineral Dominated",
+                        ifelse(Sample %in% c("CO + 1:1 Clay", "SRO"), "Metal Oxide Dominated",
+                        ifelse(Sample %in% c("2:1 Clay + CO", "1:1 Clay + Quartz", "Mixed Clay + Quartz"), "Clay Dominated",
+                        ifelse(Sample %in% c("Quartz", "MiB1 Spodosol - Bulk"), "Quartz Sand Dominated",""))))) %>% #glimpse()
+  dplyr::mutate(group = factor(group, levels = c("Quartz Sand Dominated", "Primary Mineral Dominated",  "Metal Oxide Dominated", "Clay Dominated"), 
+                               ordered = TRUE)) %>%
+  #dplyr::mutate(Sample = factor(Sample, levels = weathOrg, ordered = TRUE)) %>% 
+  group_by(Sample) %>% #glimpse()
+  dplyr::mutate(norm = Moving / max(Moving)) %>% #View()
+  ggplot(aes(x = temp, y = norm, color = Sample)) +
+    geom_vline(xintercept = 450, lty = 2) +
+    geom_line(size = 1.2, linetype = 1) +
+    theme_bw() + ylab("Normalized C Release") + xlab('Temp. (C)') +
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 13),
+          panel.grid = element_blank(),
+          strip.text.x = element_text(size=11, face = "bold"),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12),
+          strip.background = element_blank()) +
+    scale_color_manual(values = MinCols) +
+    facet_wrap(~group) +
+    xlim(140,700)
+
+bind_rows(.id = "Sample",
+          `Quartz` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_MiB1 8 Heavy ReRun_RPO.csv'),
+          `MiB1 Bulk` = read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/smooth_MiB1 8 Bulk ReRun_RPO.csv')) %>% 
+          #"Le4 Clay" = read.csv('smooth_Le4_1508_rerun_RPO.csv')) %>%
+  dplyr::mutate(group = ifelse(Sample %in% c("Felsic PM + Mixed Clay", "Int. PM + SRO", "Mafic PM + CO"), "Primary Mineral Dominated",
+                        ifelse(Sample %in% c("CO + 1:1 Clay", "SRO"), "Metal Oxide Dominated",
+                        ifelse(Sample %in% c("2:1 Clay + CO", "1:1 Clay + Quartz", "Mixed Clay + Quartz"), "Clay Dominated",
+                        ifelse(Sample %in% c("Quartz", "MiB1 Bulk"), "Quartz Sand Dominated",""))))) %>% #glimpse()
+  dplyr::mutate(group = factor(group, levels = c("Quartz Sand Dominated", "Primary Mineral Dominated",  "Metal Oxide Dominated", "Clay Dominated"), 
+                               ordered = TRUE)) %>%
+  #dplyr::mutate(Sample = factor(Sample, levels = weathOrg, ordered = TRUE)) %>% 
+  group_by(Sample) %>% #glimpse()
+  dplyr::mutate(norm = Moving / max(Moving)) %>% #View()
+  ggplot(aes(x = temp, y = norm, color = Sample)) +
+    geom_vline(xintercept = 450, lty = 2) +
+    geom_line(size = 1.2, linetype = 1) +
+    theme_bw() + ylab("Normalized C Release") + xlab('Temp. (C)') +
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 13),
+          panel.grid = element_blank(),
+          strip.text.x = element_text(size=11, face = "bold"),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12),
+          strip.background = element_blank()) +
+    scale_color_manual(values = c("black", '#969696')) +
+    facet_wrap(~group) +
+    xlim(140,700)
+
+```
+
+```{r Thermogram Stats calculations, echo = FALSE, include=FALSE}
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/')
+
+Tstats = list("1:1 Clay + Quartz" = FractionSizes('smooth_SA 776 Frac_RPO.csv', temps_in = c(255, 342, 410, 465, 800))$stats,
+              "Mixed Clay + Quartz" = FractionSizes('smooth_SA 742_RPO.csv', temps_in = c(263, 346, 380, 465))$stats,
+              "Felsic PM + Mixed Clay" = FractionSizes('smooth_BSwf 20-30 Frac fix_RPO.csv', temps_in = c(258, 295, 390, 475))$stats,
+              "Int. PM + SRO" = FractionSizes('smooth_ANwf MOM_RPO.csv')$stats,
+              "Mafic PM + CO" = FractionSizes('smooth_GRwf MOM_RPO.csv')$stats,
+              "Quartz" = FractionSizes('smooth_MiB1 8 Heavy ReRun_RPO.csv')$stats,
+              "MiB1 Spodosol - Bulk" = FractionSizes('smooth_MiB1 8 Bulk ReRun_RPO.csv')$stats,
+              "2:1 Clay + CO" = FractionSizes('smooth_Le4_1508_rerun_RPO.csv')$stats,
+              "CO + 1:1 Clay" = FractionSizes('smooth_LSAG113_RPO.csv')$stats,
+              "SRO" = FractionSizes('smooth_LSAG 69_RPO.csv')$stats)
+```
+
+```{r Kucerik fractions 450-550 fraction, echo = FALSE, include = FALSE}
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/RPOs/')
+
+clay.stats = list("Quartz" = FractionSizes('smooth_MiB1 8 Heavy ReRun_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+                  "1:1 Clay + Quartz" = FractionSizes('smooth_SA 776 Frac_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "Mixed Clay + Quartz" = FractionSizes('smooth_SA 742_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "Felsic PM + Mixed Clay" = FractionSizes('smooth_BSwf 20-30 Frac fix_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "Int. PM + SRO" = FractionSizes('smooth_ANwf MOM_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "Mafic PM + CO" = FractionSizes('smooth_GRwf MOM_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              
+              "MiB1 Spodosol - Bulk" = FractionSizes('smooth_MiB1 8 Bulk ReRun_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "2:1 Clay + CO" = FractionSizes('smooth_Le4_1508_rerun_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "CO + 1:1 Clay" = FractionSizes('smooth_LSAG113_RPO.csv', temps_in = c(400, 450, 550))[[1]],
+              "SRO" = FractionSizes('smooth_LSAG 69_RPO.csv', temps_in = c(400, 450, 550))[[1]])
+
+clay.stats %>% 
+  bind_rows(.id = "Sample") %>% #glimpse()
+  dplyr::filter(Sample != "MiB1 Spodosol - Bulk") %>% 
+  dplyr::filter(`Temp.` != 788) %>% #View()
+  #dplyr::filter(`Temp.` == "550") %>% View()
+  ggplot() + 
+    geom_vline(aes(xintercept = `Frac. Prop`, color = Sample), size = 1.2) + 
+  facet_wrap(~`Temp.`, scales = "free_x") + 
+  theme_bw() + scale_color_manual(values = MinCols)
+
+bind_rows(clay.stats, .id = "Sample.Name.N") %>% 
+  dplyr::filter(Temp. == 550) %>% 
+  dplyr::select(Sample.Name.N, `Frac. Prop`) -> T450
+```
+
+```{r Thermogram Stats for display, echo = FALSE}
+Tstats %>%
+  bind_rows(.id = "Sample") %>% #View()
+  ggplot() +
+    geom_vline(aes(xintercept = stat, color = Sample), size = 1.2) +
+    facet_wrap(facets = ~Perc, scales = "free_x") +
+    theme_bw() + xlab("Temp. (C)") +
+    ggtitle("Simple Stats :: Percentiles and Mean") +
+    scale_color_manual(values = MinCols)
+
+```
+
+```{r AddInEa, echo=FALSE}
+
+Edf <- data.frame()
+l <- 1
+h <- 5
+
+#### Adding activation energy data
+for(i in list.files('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/PyrOx/Ea_files',
+                    full.names = TRUE)){
+  #print(strsplit(i, "_")[[1]][3])
+  Edf <- bind_rows(Edf, read.csv(i))
+  Edf$Sample[l:h] <- strsplit(i, "_")[[1]][3]
+  l = l + 5
+  h = h + 5
+}
+
+Edf %>% 
+  dplyr::mutate(Sample.Name.N = factor(ifelse(Sample == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample))))))))))) -> Edf
+Edf %>% 
+  dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% 
+  ggplot(aes(y = E..kJ.mol., x = X, color = Sample.Name.N)) +
+  geom_smooth(se = FALSE, method = 'lm', alpha = 0.1) +
+  geom_point(size = 3) + theme_bw() +
+  scale_color_manual(values = MinCols)
+
+Edf %>%
+  dplyr::group_by(Sample.Name.N) %>% 
+  dplyr::summarize(Slope = lm(Fm ~ E..kJ.mol.)$coefficients[2])
+```
+
+```{r MineralogyData and totDat, include=FALSE}
+isod %>% #View()
+  dplyr::select(!c("Frac_date", "Prop_TG_final", "vol.13C",
+                   "...21","...25","...32","...36")) %>%
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N, ordered = FALSE)) %>% 
+  dplyr::left_join(Edf, by = c("Sample.Name.N", "Frac_No" = "X")) %>% 
+  #filter(!Sample.Name %in% c("1:1 Clay + Quartz")) %>% 
+  dplyr::group_by(Sample.Name.N) %>% #glimpse()
+  dplyr::mutate(Fm_norm = Fm.x / max(Fm.x)) %>% #glimpse()
+  dplyr::mutate(slopeFm = abs(unlist(lm(Fm.y ~ E..kJ.mol.)[1])[2])) %>% #glimpse()
+  dplyr::mutate(slope13 = unlist(lm(d13C ~ E..kJ.mol.)[1])[2]) %>% #glimpse()
+  dplyr::mutate(wtd_slopeFm = abs(unlist(lm(Fm.x ~ E..kJ.mol., weights = Prop_TG_init)[1])[2])) %>% #glimpse()
+  dplyr::mutate(wtd_slope13 = unlist(lm(d13C ~ E..kJ.mol., weights = Prop_TG_init)[1])[2]) %>% #glimpse()
+  dplyr::mutate(Fm_norm_0 = Fm.x - wtd.mean(Fm.x, weights = Prop_TG_init)) %>% #glimpse()
+  #dplyr::mutate(Sample.Name.N = factor(Sample.Name.N, ordered = TRUE)) %>% 
+  left_join(minDat, by = "Sample.Name.N") %>% 
+  dplyr::mutate(d13C = as.numeric(d13C)) -> totDat
+
+```
+
+```{r 14C_over_Ea, echo=FALSE, message=FALSE}
+wetz_dat = data.frame(E..kJ.mol. = c(125.4392874,
+                                     131.7693632,
+                                     141.8729706,
+                                     151.2845505,
+                                     160.6734633,
+                                     165.3879271,
+                                     167.7822917),
+                      Fm.x = c(0.8328,
+                               0.84,
+                               0.853,
+                               0.8535,
+                               0.8323,
+                               0.7927,
+                               0.3227),
+                      Prop_TG_init = c(
+                        0.094,
+                        0.335,
+                        0.207,
+                        0.119,
+                        0.096,
+                        0.079,
+                        0.052
+                      ), Sample.Name = "Wetzstein")
+
+# ggplot(wetz_dat, aes(E..kJ.mol., y = (Fm.x  / max(Fm.x) ))) +
+#   geom_point() + theme_bw() +
+#   geom_smooth(method = 'lm', se = FALSE)
+
+isod$Sample.Name.N = factor(isod$Sample.Name.N, ordered = FALSE)
+
+#14C over activation energy - lines
+isod %>% #View()
+  filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% 
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N, ordered = FALSE)) %>% 
+  left_join(Edf, by = c("Sample.Name.N", "Frac_No" = "X")) %>% #glimpse()
+  #left_join(wetz_dat, by = "Sample.Name") %>% View()
+  #filter(!Sample.Name == 'LSAG 113') %>%
+  dplyr::group_by(Sample.Name.N) %>% #glimpse()
+  filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+  dplyr::mutate(Fm_norm = Fm.y / max(Fm.y)) %>% 
+  # mutate(group = ifelse(Sample %in% c("BSwf", "ANwf", "GRwf", "Le4 Clay"), "Mixed",
+  #                       ifelse(Sample %in% c("LSAG 113", "LSAG 69"), "Volcanic",
+  #                              ifelse(Sample %in% c("Le4", "SA776", "SA742"), "Clays",
+  #                                     ifelse(Sample %in% c("MiB1 Heavy", "MiB1 Bulk"), "Oxides",""))))) %>%
+  ggplot(aes(x = E..kJ.mol., y = Fm_norm, color = Sample.Name.N)) +
+    geom_line(size = 1.2) +
+    #geom_smooth(method = lm, se = FALSE) +
+    #geom_point(size =2.2) +
+    theme_bw() +
+    scale_color_manual(values = MinCols)
+
+# Normalized Fm to 0, with fit lines
+isod %>% #View()
+  filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% 
+  dplyr::left_join(Edf, by = c("Sample.Name.N", "Frac_No" = "X")) %>%
+  #dplyr::filter(!Sample.Name.N %in% c("SA 776", "SA 742")) %>%
+  dplyr::group_by(Sample.Name.N) %>% #glimpse()
+  dplyr::mutate(Fm_norm = Fm.x / max(Fm.x)) %>% #glimpse()
+  dplyr::mutate(Fm_norm_0 = Fm.x - wtd.mean(Fm.x, weights = Prop_TG_init)) %>% #View()
+  # mutate(group = ifelse(Sample %in% c("BSwf", "ANwf", "GRwf", "Le4 Clay"), "Mixed",
+  #                       ifelse(Sample %in% c("LSAG 113", "LSAG 69"), "Volcanic",
+  #                              ifelse(Sample %in% c("Le4", "SA776", "SA742"), "Clays",
+  #                                     ifelse(Sample %in% c("MiB1 Heavy", "MiB1 Bulk"), "Oxides",""))))) %>%
+  ggplot(aes(x = E..kJ.mol., y = Fm_norm_0, color = Sample.Name.N)) +
+    #geom_errorbar(aes(xmin = E..kJ.mol. - E.std...kJ.mol., xmax = E..kJ.mol. + E.std...kJ.mol.), alpha = 0.4) +
+    #geom_point(size =2.2) + labs(color="") +
+    geom_smooth(method = lm, se = FALSE) +
+    theme_bw() + theme(legend.position = "bottom") +
+    scale_color_manual(values = MinCols)
+
+# Normalized Fm to 0, grouped
+isod %>% #View()
+  dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% 
+  dplyr::filter(H_Temp != 200) %>% #glimpse()
+  dplyr::left_join(Edf, by = c("Sample.Name.N", "Frac_No" = "X")) %>%
+  #dplyr::filter(!Sample.Name.N %in% c("SA 776", "SA 742")) %>%
+  dplyr::group_by(Sample.Name.N) %>% #glimpse()
+  dplyr::mutate(Fm_norm = Fm.x / max(Fm.x)) %>% #glimpse()
+  dplyr::mutate(Fm_norm_0 = Fm.x - wtd.mean(Fm.x, weights = Prop_TG_init)) %>% #View()
+  dplyr::mutate(group = factor(ifelse(Sample.Name.N %in% c("Mafic PM + CO", "Int. PM + SRO", "Felsic PM + Mixed Clay"), "Primary Minerals + Clay",
+                               ifelse(Sample.Name.N %in% c("SRO", "CO + 1:1 Clay"), "Metal Oxides",
+                                      ifelse(Sample.Name.N %in% c("2:1 Clay + CO", "1:1 Clay + Quartz", "Mixed Clay + Quartz"), "Weathered Minerals + Clay",
+                                             ifelse(Sample.Name.N %in% c("Quartz"), "")))))) %>% #View()
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N, levels = c("SRO", "CO + 1:1 Clay", "Quartz",
+                                                                 "1:1 Clay + Quartz", "Mixed Clay + Quartz", "2:1 Clay + CO",
+                                                                 "Mafic PM + CO", "Felsic PM + Mixed Clay", "Int. PM + SRO"), ordered = TRUE)) %>% 
+  ggplot() +
+    #geom_errorbar(aes(xmin = E..kJ.mol. - E.std...kJ.mol., xmax = E..kJ.mol. + E.std...kJ.mol.), alpha = 0.4) +
+    geom_hline(yintercept = 0, linetype = 2, size = 1.4, color = "gray40") +
+    
+    # geom_ribbon(aes(x = E..kJ.mol., y = Fm_norm_0, fill = group, color = group), stat = "smooth", method = lm, se = TRUE, 
+    #             alpha = 0.0, size = 0.2, linetype = 1) +
+    geom_smooth(aes(x = E..kJ.mol., y = Fm_norm_0, color = group, fill = group), method = lm, se = TRUE, alpha = 0.15) +
+    geom_point(aes(x = E..kJ.mol., y = Fm_norm_0, color = Sample.Name.N, shape = Sample.Name.N), size = 4) +
+    #geom_point(size =4.2, alpha = 0.8) + 
+    labs(color="Group", fill = "") +
+    theme_bw() + theme(legend.position = "bottom") +
+    xlab("Activation Energy (kJ / mol)") + ylab("Sample Mean Normalized Fm") +
+    scale_color_manual(values = c(`Weathered Minerals + Clay` = "#1b9e77", `Metal Oxides` = "#de2d26", `Primary Minerals + Clay` = "#2b8cbe", `Quartz` = "#969696", MinCols)) +
+    scale_fill_manual(values = c(`Weathered Minerals + Clay` = "#1b9e77", `Metal Oxides` = "#de2d26", `Primary Minerals + Clay` = "#2b8cbe", `Quartz` = "#969696")) +
+    scale_shape_manual(values = MinShapes) +
+    #scale_fill_manual(values = c(Clay ="#1b9e77",`Metallo-Organic` = "#d95f02", Mixed = "#7570b3")) +
+    theme(axis.text = element_text(size = 11),
+          axis.title = element_text(size = 12))
+
+
+#F14R Slopes normalized to 1
+totDat %>%
+  filter(Sample.Name.N %notin% c("CO + 1:1 Clay", "MiB1 Spodosol - Bulk")) %>%
+  #filter(Sample.Name %in% c("SA 742", "SA 776")) %>%
+  group_by(Sample.Name.N) %>%
+  dplyr::mutate(F14R = Fm.x / max(Fm.x)) %>% #View()
+  ggplot(aes(E..kJ.mol., y = F14R, color = Sample.Name.N)) +
+    geom_errorbar(aes(xmin = E..kJ.mol. - E.std...kJ.mol., xmax = E..kJ.mol. + E.std...kJ.mol.)) +
+    geom_point() + ggtitle('Fm Slope Over Activation Energy, normalized to 1 (F14R)') + 
+    geom_smooth(method = 'lm', se = FALSE) +
+    scale_color_manual(values = MinCols) +
+    theme_bw()
+
+#F13R Slopes normalized to 1 - weighted
+totDat %>%
+  filter(Sample.Name.N %notin% c("CO + 1:1 Clay", "MiB1 Spodosol - Bulk")) %>%
+  #filter(Sample.Name.N %in% c("SA 742", "SA 776")) %>%
+  group_by(Sample.Name.N) %>%
+  dplyr::mutate(F13R =  min(d13C)/d13C) %>% #View()
+  ggplot(aes(E..kJ.mol., y = F13R, color = Sample.Name.N, weight = Prop_TG_init)) +
+    geom_errorbar(aes(xmin = E..kJ.mol. - E.std...kJ.mol., xmax = E..kJ.mol. + E.std...kJ.mol.)) +
+    geom_point() + ggtitle('Slope of d13C with Activation Energy - Mass weighted') +
+    geom_smooth(method = 'lm', se = FALSE) + 
+    scale_color_manual(values = MinCols) + labs(color = "Sample") +
+    theme_bw()
+
+#F13R Slopes normalized to 1 - weighted
+totDat %>%
+  filter(Sample.Name.N %notin% c("CO + 1:1 Clay", "MiB1 Spodosol - Bulk")) %>%
+  #filter(Sample.Name %in% c("SA 742", "SA 776")) %>%
+  group_by(Sample.Name.N) %>%
+  dplyr::mutate(F13R =  min(d13C)/d13C) %>% #View()
+  ggplot(aes(E..kJ.mol., y = F13R, color = Sample.Name.N)) +
+    geom_errorbar(aes(xmin = E..kJ.mol. - E.std...kJ.mol., xmax = E..kJ.mol. + E.std...kJ.mol.)) +
+    geom_point() + ggtitle('Slope of d13C with Activation Energy') +
+    geom_smooth(method = 'lm', se = FALSE) + 
+    scale_color_manual(values = MinCols) + labs(color="Sample") +
+    theme_bw()
+
+```
+
+```{r Depth-correcting 14C for comparison, echo=FALSE, message = FALSE}
+### Supress errors for "melt" function
+options(warn = -1)
+
+library(mpspline2)
+#library(tidyverse)
+library(data.table)
+
+eval(parse('https://raw.githubusercontent.com/International-Soil-Radiocarbon-Database/ISRaD/master/Rpkg/R/convert_fm_d14c.R'))
+
+d14 <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/DepthCorr14C.csv')
+#d14$Sample <- factor(d14$Sample)
+
+d14 <- d14 %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample)))))))))))
+
+d14$mass_c_g = (d14$BD * (d14$Tot_C / 100)) * (d14$Depth_bot - d14$Depth_top)
+d14$lyr_name = paste0(d14$Sample.Name.N, "_", d14$Depth_top, "_", d14$Depth_bot)
+
+d14$D14C[34:59] = convert_fm_d14c(fm = d14$Fm, obs_date_y = d14$obs_date_y, verbose = FALSE)[34:59]
+
+d14$fm <- ISRaD::convert_fm_d14c(d14c = d14$D14C, obs_date_y = d14$obs_date_y, verbose = FALSE)
+
+colnames(d14)[2:3] <- c("lyr_bot", "lyr_top")
+
+d14 <- d14 %>% 
+  dplyr::select(c("Sample.Name.N", "lyr_top", "lyr_bot", "lyr_name", "mass_c_g", "fm", 'frc')) 
+
+### Splines of Fm and C stock
+dfm.sp <- mpspline(d14, var_name = "fm", d = seq(1,100))
+dc.sp <- mpspline(d14, var_name = "mass_c_g", d = seq(1,100))
+
+### Plot Fm splines
+dfm.sp %>%
+  melt(value.name = "Fm_est", id.vars = 1) %>% 
+  dplyr::filter(L2 == "est_dcm") %>% #View()
+  dplyr::select(-c(L2)) %>% #View()
+  dplyr::rename(c(Sample.Name.N = L1)) %>% #View() 
+  group_by(Sample.Name.N) %>% 
+  dplyr::mutate(Fm_est = as.numeric(Fm_est)) %>% 
+  dplyr::mutate(depth = seq(1,99)) %>% 
+  #sapply(class) 
+  ggplot(aes(x = Fm_est, y = -depth, color = Sample.Name.N)) + 
+  geom_line(orientation = "y", size = 1.2, alpha = 0.7) + theme_bw() +
+  scale_color_manual(values = MinCols) + xlab('Fraction Modern') +
+  geom_point(data = d14, aes(y = -((lyr_bot + lyr_top) / 2), x = fm, color = Sample.Name.N), alpha = 0.7)
+
+### Plot C stock splines
+dc.sp %>%
+  melt(value.name = "C_est", id.vars = 1) %>% 
+  dplyr::filter(L2 == "est_dcm") %>% #View()
+  dplyr::select(-c(L2)) %>% #View()
+  dplyr::rename(c(Sample.Name.N = L1)) %>% #View() 
+  group_by(Sample.Name.N) %>% 
+  dplyr::mutate(C_est = as.numeric(C_est)) %>% 
+  dplyr::mutate(depth = seq(1,99)) -> dc.sp #For comparison with depth Fm 
+  #sapply(class) 
+ggplot(dc.sp, aes(x = C_est, y = -depth, color = Sample.Name.N)) + 
+  geom_line(orientation = "y", size = 1.2, alpha = 0.7) + theme_bw() +
+  scale_color_manual(values = MinCols) + xlab("C mass (g)") +
+  geom_point(data = d14, aes(y = -((lyr_bot + lyr_top) / 2), x = mass_c_g, color = Sample.Name.N), alpha = 0.7)
+
+### Save Fm at target depth
+tarD = 45
+dfm.sp %>%
+  melt(value.name = "Fm_est", id.vars = 1) %>% 
+  dplyr::filter(L2 == "est_dcm") %>% #View()
+  dplyr::select(-c(L2)) %>% #View()
+  dplyr::rename(c(pro_name = L1)) %>% #View() 
+  group_by(pro_name) %>% 
+  dplyr::mutate(Fm_est = as.numeric(Fm_est)) %>% 
+  dplyr::mutate(depth = seq(1,99)) %>% #View()
+  dplyr::filter(depth == tarD) %>% 
+  as.data.frame()-> depthFm
+
+### Fraction modern as a function of C content
+ggplot(data = d14, aes(x = log(mass_c_g / (lyr_bot - lyr_top)), y = fm, color = Sample.Name.N, shape = Sample.Name.N)) +
+  geom_point(size = 4) + theme_bw() +
+  scale_shape_manual(values = MinShapes) +
+  ylab("Fraction Modern 14C") + xlab('Log (C / depth range)') + 
+  ggtitle("Radiocarbon as a function of C content") +
+  scale_color_manual(values = MinCols)
+
+###
+data.frame(dfm.sp$`1:1 Clay + Quartz`$est_1cm,
+          dfm.sp$`2:1 Clay + CO`$est_1cm,
+          dfm.sp$`CO + 1:1 Clay`$est_1cm,
+          dfm.sp$`Felsic PM + Mixed Clay`$est_1cm,
+          dfm.sp$`Int. PM + SRO`$est_1cm,
+          dfm.sp$`Mafic PM + CO`$est_1cm,
+          dfm.sp$`Mixed Clay + Quartz`$est_1cm,
+          dfm.sp$Quartz$est_1cm,
+          dfm.sp$SRO$est_1cm) -> df14
+
+colnames(df14) <- c("1:1 Clay + Quartz", "2:1 Clay + CO", "CO + 1:1 Clay",
+                    "Felsic PM + Mixed Clay", "Int. PM + SRO", "Mafic PM + CO",
+                    "Mixed Clay + Quartz", "Quartz", "SRO")
+
+bind_rows(df14) %>% 
+  #dplyr::mutate(`Sample Name` = seq(1, 100)) %>% 
+  melt() %>% #glimpse()
+  dplyr::rename("Sample Name" = variable, "Fm" = value) %>% #distinct(`Sample Name`)
+  #dplyr::filter(Sample Name != )
+  dplyr::mutate(depth = rep(seq(1,100), each = 1, length.out = n())) %>%
+  left_join(minDat, by = c("Sample Name" = "Sample.Name.N")) %>% #glimpse()
+  dplyr::select(`Sample Name`, Fm, depth, Depth.Top, Depth.Bottom, Bulk.14C) %>% 
+  dplyr::mutate(`Bulk Fm` = AbsoluteFractionModern_from_Delta14C(Bulk.14C)) %>% 
+  group_by(`Sample Name`) %>% 
+  dplyr::mutate(MidDepth = mean(c(Depth.Top, Depth.Bottom))) %>% #View()
+  ggplot(., aes(x = Fm, y = -depth, color = `Sample Name`, shape = `Sample Name`)) +
+    geom_hline(yintercept = -45, size = 1.2, linetype = 'dashed', color = 'gray') +
+    geom_line(orientation = 'y', size = 1.2, alpha = 0.8) + 
+    geom_point(aes(x = `Bulk Fm`, y = -MidDepth), size = 5) + theme_bw() +
+    scale_color_manual(values = MinCols) +
+    scale_fill_manual(values = MinCols) +
+    scale_shape_manual(values = MinShapes) +
+    ylab("Depth (cm)") +
+    theme(panel.grid = element_blank(),
+          axis.text = element_text(size = 11),
+          axis.title = element_text(size = 12))
+
+options(warn = 0)
+```
+
+```{r py-GC/MS, echo=FALSE, message=FALSE}
+### Summary Stats of Origin and Sample
+### Lab notes and calculations
+isod <- drop_na(data.frame(read_xlsx('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/FractionNotesCalcs.xlsx', skip = 2)), Final.)
+isod <- isod %>% dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample.Name)))))))))))
+
+py <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/Ch3MinpyGCMSlong.csv')
+
+py <- py %>% 
+  dplyr::mutate(Sample.Name.N = factor(ifelse(Sample.Name == "Laupahoehoe", "SRO", 
+                                       ifelse(Sample.Name == "Kokee", "CO + 1:1 Clay", 
+                                       ifelse(Sample.Name == "MiB1 Spodosol", "Quartz", 
+                                       ifelse(Sample.Name == "GR Sierra", "Mafic PM + CO",
+                                       ifelse(Sample.Name == "BS Sierra", "Felsic PM + Mixed Clay",
+                                       ifelse(Sample.Name == "AN Sierra", "Int. PM + SRO",
+                                       ifelse(Sample.Name == "SA Black Basalt", "2:1 Clay + CO",
+                                       ifelse(Sample.Name == "SA Gr Crest", "1:1 Clay + Quartz",
+                                       ifelse(Sample.Name == "SA Gr Toeslope", "Mixed Clay + Quartz",
+                                              Sample.Name)))))))))))
+
+py$Sample <- factor(py$Sample.Name.N, levels = c('SRO', 'CO + 1:1 Clay', "Quartz", "MiB1 Spodosol - Bulk", 
+                                               "Mixed Clay + Quartz", "1:1 Clay + Quartz",  "2:1 Clay + CO", "Mafic PM + CO", "Int. PM + SRO"), ordered = TRUE)
+py <- py[order(py$Sample),]
+
+#py %>% group_by(Sample.Name, Origin) %>% dplyr::filter(Origin != "CONT") %>% dplyr::summarize(y = length(unique(Compound))) %>% View()
+
+### Plot
+# py %>%
+#   #filter(Sample == "Le4-1") %>%
+#   dplyr::filter(HighT != 400) %>%
+#   dplyr::filter(Origin %notin% c("CONT", "")) %>%
+#   dplyr::filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+#   #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+#   dplyr::mutate(Origin = factor(Origin, levels = c("PS", "LIP", "ARO", "PAH", "ALK", "N", "S", "OTHER"))) %>%
+#   dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+#   #group_by(Sample) %>% #View()
+#   dplyr::full_join(isod, by = "Sample.Name.N") %>% #View()
+#   dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+#   dplyr::group_by(Sample.Name.N, HighT, LowT, midT, Origin) %>% #, Mineralogy) %>% #View()
+#   dplyr::summarise(n = sum(Area.Pct)) %>% #View()
+#   dplyr::mutate(prop = n / sum(n)) %>% #View()
+#   #mutate(topprop = n / cumsum(n)) %>%
+#   dplyr::mutate(topprop = cumsum(prop)) %>% 
+#   dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+#   .[1:79,] %>% # -> fart
+#   #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+#   dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+#   dplyr::ungroup() %>% 
+#   full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #, by = c("Sample.Name.N" = "Sample.Sample")) %>% #View()
+#   #View() %>%
+#   ggplot(aes(y = prop, xmin = LowT, xmax = HighT, ymin = botprop, ymax = topprop, fill = Origin)) +
+#     #geom_line() +
+#     xlab('Temperature (C)') + coord_cartesian(xlim = c(200, 550)) +
+#     #geom_col(width = 50, alpha = 0.8) +
+#     geom_rect(color = 'black', position = 'fill') +
+#     #scale_y_discrete(labels = c(0,0.5,1)) +
+#     theme(strip.text.x = element_text(size=11, face = "bold")) +
+#     scale_fill_brewer(palette = "Dark2") + ylab("Proportion of Total Fraction C Release") +
+#     facet_wrap(~label, ncol = 1) + theme_bw()
+
+  pyMin$Sample.Sample.Name.N <- factor(pyMin$Sample.Sample.Name.N, ordered = FALSE)
+
+  py %>%
+    #filter(Sample == "Le4-1") %>%
+    dplyr::filter(HighT != 400) %>%
+    dplyr::filter(Origin %notin% c("CONT", "")) %>%
+    dplyr::filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+    #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+    dplyr::mutate(Origin = factor(Origin, levels = c("PS", "LIP", "ARO", "PAH", "ALK", "N", "S", "OTHER"))) %>%
+    dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+    #group_by(Sample) %>% #View()
+    dplyr::full_join(isod, by = "Sample.Name.N") %>% #View()
+    dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+    dplyr::group_by(Sample.Name.N, HighT, LowT, midT, Origin) %>% #, Mineralogy) %>% #View()
+    dplyr::summarise(n = sum(Area.Pct)) %>% #View()
+    dplyr::mutate(prop = n / sum(n)) %>% #View()
+    #mutate(topprop = n / cumsum(n)) %>%
+    dplyr::mutate(topprop = cumsum(prop)) %>% 
+    dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+    .[1:79,] %>% # -> fart
+    #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+    dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+    dplyr::mutate(Sample.Name.N = factor(Sample.Name.N)) %>% 
+    dplyr::ungroup() %>% #glimpse()
+    dplyr::full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #View() #, by = c("Sample.Name.N" = "Sample.Sample")) %>% View()
+    #View() %>%
+    dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% #View()
+    dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c("SRO", "CO + 1:1 Clay", "1:1 Clay + Quartz", "Mixed Clay + Quartz", "2:1 Clay + CO", "Int. PM + SRO", "Mafic PM + CO", "Felsic PM + Mixed Clay", "Quartz"),
+                                         ordered = TRUE)) %>% #View()
+    ggplot(aes(y = prop, xmin = LowT, xmax = HighT, ymin = botprop, ymax = topprop, fill = Origin, color = Origin)) +
+    #geom_line() +
+      xlab('Temperature (C)') + coord_cartesian(xlim = c(200, 550)) +
+      #geom_col(width = 50, alpha = 0.8) +
+      geom_rect(position = 'fill', alpha = 0.9) +
+      geom_rect(fill = NA, position = 'fill', size = 1, alpha = 1) +
+      #scale_y_discrete(labels = c(0,0.5,1)) +
+      theme(strip.text.x = element_text(size=11, face = "bold")) +
+      #geom_line(data = longtherm, mapping = aes(x = temp, y = norm, color = Sample)) +
+      scale_fill_brewer(palette = "Dark2") + scale_color_brewer(palette = "Dark2") + 
+      ylab("Proportion of Thermal Fraction C Release") +
+      facet_wrap(~Sample.Name.N, ncol = 1) + theme_bw()
+  
+  #### Over activation energy
+  py %>%
+    #filter(Sample == "Le4-1") %>%
+    dplyr::filter(HighT != 400) %>%
+    dplyr::filter(Origin %notin% c("CONT", "")) %>%
+    dplyr::filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+    #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+    dplyr::mutate(Origin = factor(Origin, levels = c("Polysaccharide", "Lipid", "Alkane", "Aromatic", "PAH", "N-Bearing", "S-Bearing", "OTHER"))) %>% 
+    #dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+    #group_by(Sample) %>% #View()
+    dplyr::full_join(isod, by = "Sample.Name.N") %>% #glimpse()
+    dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+    dplyr::group_by(Sample.Name.N, E_mean, E_std, Origin, E_lower, E_upper) %>% #, Mineralogy) %>% #View()
+    dplyr::summarise(n = sum(Area.Pct)) %>% #glimpse()
+    dplyr::mutate(prop = n / sum(n)) %>% #View()
+    #mutate(topprop = n / cumsum(n)) %>%
+    dplyr::mutate(topprop = cumsum(prop)) %>% 
+    dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+    .[1:79,] %>% # -> fart
+    #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+    dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+    dplyr::mutate(Sample.Name.N = factor(Sample.Name.N)) %>% 
+    dplyr::ungroup() %>% #glimpse()
+    dplyr::full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #View() #, by = c("Sample.Name.N" = "Sample.Sample")) %>% View()
+    #View() %>%
+    dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% #View()
+    dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c("SRO", "CO + 1:1 Clay", "1:1 Clay + Quartz", "Mixed Clay + Quartz", "2:1 Clay + CO", "Int. PM + SRO", "Mafic PM + CO", "Felsic PM + Mixed Clay", "Quartz"),
+                                         ordered = TRUE)) %>% #View()
+    ggplot(aes(y = prop, xmin = E_lower, xmax = E_upper, ymin = botprop, ymax = topprop, fill = Origin, color = Origin)) +
+      #geom_line() +
+      xlab('Activation energy (kJ / mol)') + coord_cartesian(xlim = c(113, 204)) +
+      #geom_col(width = 50, alpha = 0.8) +
+      geom_rect(fill = NA, position = 'fill', size = 1.4, alpha = 1, color = 'black') +
+      geom_rect(position = 'fill', alpha = 0.95, color = NA) +
+      #scale_y_discrete(labels = c(0,0.5,1)) +
+      theme_bw() +
+      theme(strip.text.x = element_text(size=11, face = "bold"),
+            panel.grid = element_blank(),
+            axis.text = element_text(size = 13),
+            axis.title = element_text(size = 14)) +
+      #geom_line(data = longtherm, mapping = aes(x = temp, y = norm, color = Sample)) +
+      scale_fill_manual(values = c(brewer_pal(palette = "Set2")(7), 'grey')) +
+      #scale_color_manual(values = c(brewer_pal(palette = "Set2")(7), 'grey')) +
+      #scale_fill_brewer(palette = "Greens") + scale_color_brewer(palette = "Greens") + 
+      ylab("Proportion of Thermal Fraction C Release") +
+      facet_wrap(~Sample.Name.N, ncol = 1) +
+      scale_y_continuous(breaks = c(0, 0.5, 1.0)) +
+      scale_x_continuous(breaks = c(seq(115, 215, by = 10))) 
+  
+  #### With Ea dists overlain
+  setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/PyrOx/p_files')
+
+E <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Ch3/Thermograms/FinalThermosAll/PyrOx/Le4_1508/Le4_Le4_E.csv')
+
+longEa = rbind(data.frame(read.csv('MiB1 8 Heavy ReRun_MiB1 8 Heavy ReRun_p_tot.csv'), Sample = "Quartz", E), 
+             data.frame(read.csv('ANwf MOM_ANwf MOM_p_tot.csv'), Sample = "Int. PM + SRO", E),
+             #data.frame(read.csv('BSwf 20-30 Frac fix_BSwf 20-30 Frac fix_p_tot.csv'), Sample = "Felsic PM + Mixed Clay", E),
+             data.frame(read.csv('GRwf MOM_GRwf MOM_p_tot.csv'), Sample = "Mafic PM + CO", E),
+             data.frame(read.csv('LSAG 69_LSAG 69_p_tot.csv'), Sample = "SRO", E),
+             data.frame(read.csv('LSAG113_LSAG113_p_tot.csv'), Sample = "CO + 1:1 Clay", E),
+             data.frame(read.csv('Le4_Le4_p_tot.csv'), Sample = "2:1 Clay + CO", E),
+             data.frame(read.csv('SA 776 Frac_SA 776 Frac_p_tot.csv'), Sample = "Mixed Clay + Quartz", E),
+             data.frame(read.csv('SA 742_SA 742_p_tot.csv'), Sample = "1:1 Clay + Quartz", E)
+             )
+
+colnames(longEa) <- c('P', "Sample", "E")
+ggplot(longEa, aes(x = E, y = P, color = Sample)) + geom_line()
+
+longEa %>% 
+  group_by(Sample) %>% 
+  dplyr::mutate(P = (P / max(P)) - 0.03) -> longEa
+  #ggplot(aes(x =  E, y = P, color = Sample)) -> longEa
+
+py %>%
+  #filter(Sample == "Le4-1") %>%
+  dplyr::filter(HighT != 400) %>%
+  dplyr::filter(Origin %notin% c("CONT", "")) %>%
+  dplyr::filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+  #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+  dplyr::mutate(Origin = factor(Origin, levels = c("Polysaccharide", "Lipid", "Alkane",  "N-Bearing", "S-Bearing","Aromatic", "PAH", "Other"))) %>% 
+  dplyr::mutate(Origin_abb = factor(Origin, levels = c("PS", "LIP", "ALK", "ARO", "PAH", "N", "S", "OTHER"))) %>%
+  #dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+  #group_by(Sample) %>% #View()
+  dplyr::full_join(isod, by = "Sample.Name.N") %>% #glimpse()
+  dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+  dplyr::group_by(Sample.Name.N, E_mean, E_std, Origin) %>% #View()#, E_lower, E_upper) %>% View()
+  dplyr::summarise(n = sum(Area.Pct), E_lower, E_upper) %>% #View()
+  dplyr::distinct(.keep_all = TRUE) %>% #View()
+  dplyr::group_by(Sample.Name.N, E_mean, E_std) %>% #View()
+  dplyr::mutate(prop = n / sum(n)) %>% #View()
+  #mutate(topprop = n / cumsum(n)) %>%
+  dplyr::mutate(topprop = cumsum(prop)) %>% 
+  dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+  #.[1:79,] %>% # -> fart
+  #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+  dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N)) %>% 
+  dplyr::ungroup() %>% #glimpse()
+  dplyr::full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #View() #, by = c("Sample.Name.N" = "Sample.Sample")) %>% View()
+  #View() %>%
+  dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% #View()
+  dplyr::full_join(longEa, by = c("Sample.Name.N" = "Sample")) %>% #glimpse()
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                       levels = c("Quartz", 
+                                                  "Int. PM + SRO", "Felsic PM + Mixed Clay", "Mafic PM + CO",
+                                                  "SRO", "CO + 1:1 Clay", 
+                                                  "2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz"),
+                                       ordered = TRUE)) %>% #View()
+  dplyr::group_by(Sample.Name.N) %>% 
+  dplyr::mutate(P = ifelse(P < 0, 0, P)) %>% #View()
+  #dplyr::mutate(P = P / sum(P, na.rm = FALSE)) %>%# View()
+  ungroup() %>% 
+  ggplot(aes(y = prop, xmin = E_lower, xmax = E_upper, ymin = botprop, ymax = topprop, fill = Origin, color = Origin)) +
+  xlab('Activation energy (kJ / mol)') + coord_cartesian(xlim = c(113, 204)) +
+  #geom_rect(position = 'fill', alpha = 0.5) +
+  #geom_rect(fill = NA, position = 'fill', size = 1, color = 'grey85', alpha = 0.5) +
+  geom_rect(position = 'fill', color = 'NA') +
+  geom_line(aes(x = E, y = P), color = 'black') +
+  theme_bw() +
+  theme(strip.text.x = element_text(size=12, face = "bold"),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 13),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12),
+        legend.position = "bottom",
+        strip.background = element_blank()) +
+  guides(fill=guide_legend(ncol=2)) +
+  #geom_line(data = longtherm, mapping = aes(x = temp, y = norm, color = Sample)) +
+  scale_fill_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  scale_color_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  #scale_color_manual(values = c(brewer_pal(palette = "Set2")(7), 'grey')) +
+  #scale_fill_brewer(palette = "Greens") + scale_color_brewer(palette = "Greens") + 
+  ylab("Proportion of Thermal Fraction C Release") +
+  facet_wrap(~Sample.Name.N, ncol = 1) +
+  #scale_y_continuous(breaks = c(0, 0.5, 1.0)) +
+  # scale_y_continuous(
+  #   #breaks = c(0, 0.5, 1.0),
+  #   #labels = number_format(scale = 0.001),
+  #   sec.axis = sec_axis(trans = ~ .x / sum(.x),
+  #                       name = "Density")
+  # ) +
+  scale_x_continuous(breaks = c(seq(115, 215, by = 10))) 
+
+py %>%
+  #filter(Sample == "Le4-1") %>%
+  dplyr::filter(HighT != 400) %>%
+  dplyr::filter(Origin %notin% c("CONT", "")) %>%
+  dplyr::filter(Sample.Name != "MiB1 Spodosol - Bulk") %>% 
+  #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+  dplyr::mutate(Origin = factor(Origin, levels = c("Polysaccharide", "Lipid", "Alkane",  "N-Bearing", "S-Bearing","Aromatic", "PAH", "Other"))) %>% 
+  dplyr::mutate(Origin_abb = factor(Origin, levels = c("PS", "LIP", "ALK", "ARO", "PAH", "N", "S", "OTHER"))) %>%
+  #dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+  #group_by(Sample) %>% #View()
+  dplyr::full_join(isod, by = "Sample.Name.N") %>% #glimpse()
+  dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+  dplyr::group_by(Sample.Name.N, E_mean, E_std, Origin) %>% #View()#, E_lower, E_upper) %>% View()
+  dplyr::summarise(n = sum(Area.Pct), E_lower, E_upper) %>% #View()
+  dplyr::distinct(.keep_all = TRUE) %>% #View()
+  dplyr::group_by(Sample.Name.N, E_mean, E_std) %>% #View()
+  dplyr::mutate(prop = n / sum(n)) %>% #View()
+  #mutate(topprop = n / cumsum(n)) %>%
+  dplyr::mutate(topprop = cumsum(prop)) %>% 
+  dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+  #.[1:79,] %>% # -> fart
+  #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+  dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N)) %>% 
+  dplyr::ungroup() %>% #glimpse()
+  dplyr::full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #View() #, by = c("Sample.Name.N" = "Sample.Sample")) %>% View()
+  #View() %>%
+  dplyr::filter(Sample.Name.N != "MiB1 Spodosol - Bulk") %>% #View()
+  dplyr::full_join(longEa, by = c("Sample.Name.N" = "Sample")) %>% #glimpse()
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                       levels = c("Quartz", 
+                                                  "Int. PM + SRO", "Felsic PM + Mixed Clay", "Mafic PM + CO",
+                                                  "SRO", "CO + 1:1 Clay", 
+                                                  "2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz"),
+                                       ordered = TRUE)) %>% #View()
+  dplyr::group_by(Sample.Name.N) %>% 
+  dplyr::mutate(P = ifelse(P < 0, 0, P)) %>% #View()
+  #dplyr::mutate(P = P / sum(P, na.rm = FALSE)) %>%# View()
+  #dplyr::mutate(botprop = botprop * max(P, na.rm = TRUE)) %>% 
+  #dplyr::mutate(topprop = topprop * max(P, na.rm = TRUE)) %>% 
+  
+  ungroup() %>% #View()
+  ggplot(aes(y = prop, xmin = E_lower, xmax = E_upper, ymin = botprop, ymax = topprop, fill = Origin, color = Origin)) +
+  xlab('Activation energy (kJ / mol)') + coord_cartesian(xlim = c(113, 204)) +
+  #geom_rect(position = 'fill', alpha = 0.5) +
+  #geom_rect(fill = NA, position = 'fill', size = 1, color = 'grey85', alpha = 0.5) +
+  geom_rect(position = 'fill', color = 'NA') +
+  geom_line(aes(x = E, y = P), color = 'black') +
+  theme_bw() +
+  theme(strip.text.x = element_text(size=12, face = "bold"),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 13),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12),
+        legend.position = "bottom",
+        strip.background = element_blank()) +
+  guides(fill=guide_legend(ncol=2)) +
+  #geom_line(data = longtherm, mapping = aes(x = temp, y = norm, color = Sample)) +
+  scale_fill_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  scale_color_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  #scale_color_manual(values = c(brewer_pal(palette = "Set2")(7), 'grey')) +
+  #scale_fill_brewer(palette = "Greens") + scale_color_brewer(palette = "Greens") + 
+  ylab("Proportion of Thermal Fraction C Release") +
+  facet_wrap(~Sample.Name.N, ncol = 1) +
+  #scale_y_continuous(breaks = c(0, 0.5, 1.0)) +
+  scale_y_continuous(
+    breaks = c(0, 0.5, 1.0),
+    #trans = scales::trans_new("scale",function(x) {~ . / max(.)}, inverse = function(x) {~ . / max(.)}),
+    #labels = number_format(scale = 0.001),
+    sec.axis = sec_axis(#trans = ~ . / sum(.),
+                        trans = ~ . / sum(.),
+                        breaks = c(0, 0.001, 0.002),
+                        name = "Density")
+  ) +
+  scale_x_continuous(breaks = c(seq(115, 215, by = 10))) 
+
+
+```
+
+```{r Shannon Index, echo = FALSE}
+
+py %>% 
+  group_by(Sample.Name.N) %>% 
+  dplyr::summarise(Shannon = -sum( ((Pksize) / sum(Pksize, na.rm = T)) * log(((Pksize) / sum(Pksize, na.rm = T))), na.rm = T)  ) %>% #View()
+  ungroup %>% #glimpse()
+  ggplot(aes(y = Shannon, x = Frac_No, color = Sample.Name.N)) + 
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = MinCols) +
+  scale_shape_manual(values = MinShapes) +
+  ylab("Shannon Index") + 
+  xlab("Fraction Number") +
+  theme_bw()
+
+py %>% 
+  group_by(Sample.Name.N) %>% 
+  dplyr::summarise(Shannon = -sum( ((Pksize) / sum(Pksize, na.rm = T)) * log(((Pksize) / sum(Pksize, na.rm = T))), na.rm = T)  ) -> SI
+  
+
+```
+
+
+```{r Rock-Eval Indices, echo = FALSE}
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/RockEval/re6_raw')
+
+Sebag.index <- function(wd = getwd(), plots = FALSE, IT_dur = 200){
+  library(readr)
+  library(DescTools)
+  library(ggplot2)
+  library(dplyr)
+  #library(ggpubr)
+  
+  time_index <- data.frame(matrix(ncol = 7))
+  colnames(time_index) <- c("Sample.Name", "I.index", "R.index", "A1", "A2", "A3", "A4")
+  
+  plotz = list()
+  
+  for(s in list.files(getwd(), pattern = ".S00", full.names = TRUE)){
+    
+    par(mfrow = c(1,1))
+    
+    r <- read.table(paste0(StrSplit(s, ".S00"),".R00"))[2,]
+    dats <- read.table(s,
+                       sep = '\t',
+                       header = FALSE,
+                       na.strings = "-",
+                       skip = 2,
+                       col.names = c("time_s", "temp", "FID", "unknown", "IR"))
+    #plot(dats$time_s, dats$temp, type = 'l', lwd = 2, col = 'steelblue3')
+    dats %>%
+      #dplyr::slice(1:grep(max(temp), temp)[1]) %>%
+      #dplyr::filter(temp > 299) %>% 
+      dplyr::filter(time_s > IT_dur) %>% 
+      #dplyr::group_by(temp) %>% 
+      #dplyr::summarize(FID = mean(FID)) %>% #glimpse()
+      dplyr::mutate(Area = factor(ifelse(temp < 340, "A1",
+                                  ifelse(temp > 460, "A4",
+                                         ifelse(temp >= 340 & temp < 400,"A2",
+                                                "A3"))))) -> dats
+    if(plots) print(ggplot(dats, aes(x = time_s, y = FID, color = Area)) + theme_bw() + geom_line() + ggtitle(StrSplit(r, "=")[2]))
+    # dats %>%
+    #   dplyr::filter(Area == "A1") %>%
+    #   AUC(x = unlist(~time_s), y = unlist(~FID), method = 'spline', subdivisions = 2000)
+    
+    dats %>%
+      dplyr::group_by(Area) %>%
+      dplyr::summarize(min(temp), max(temp)) -> tofrom
+    
+    areas <- c()
+    for(a in tofrom$Area){
+      dats %>%
+        dplyr::filter(Area == a & FID > 0) -> dat
+      areas <- c(areas, AUC(dat$time_s, dat$FID, method = 'spline', subdivisions = 5000))
+    }
+    
+    #totArea <- AUC(dats$temp, dats$FID, method = 'spline', subdivisions = 2000)
+    totArea = sum(areas)
+    I = log10((areas[1] + areas[2])/areas[3])
+    R400 <- dplyr::filter(dats, temp > 400)
+    R = AUC(R400$time_s, R400$FID, method = 'spline', subdivisions = 5000) / totArea
+    
+    #print(I)
+    time_index = rbind(time_index, c(Sample.Name =  StrSplit(r, "=")[2],
+                               I.index = as.numeric(round(I, 4)),
+                               R.index = as.numeric(round(R,4)),
+                               A1 = round(areas[1] / totArea, 4),
+                               A2 = round(areas[2] / totArea, 4),
+                               A3 = round(areas[3] / totArea, 4),
+                               A4 = round(areas[4] / totArea, 4)))
+    
+    print(StrSplit(r, "=")[2])
+    print((areas / totArea) * 100)
+  }
+  
+  dats <- as.data.frame(sapply(time_index[2:7], as.numeric)[-1,])
+  dats$Sample.Name = time_index[-1,1]
+  return(dats)
+}
+
+### To include isotherm at 300˚0, set duration (IT_dur) to 0. Otherwise, set duration to 200
+re.index <- Sebag.index(plots = TRUE, IT_dur = 185)
+
+re.index %>% 
+  dplyr::filter(Sample.Name %notin% c("LSAG70", "MiB1 Spodosol - Bulk")) %>% 
+  dplyr::mutate(Sample.Name = ifelse(Sample.Name == "Laupahoehoe",
+                                     "SRO", ifelse(
+                                       Sample.Name == "Kokee",
+                                       "CO + 1:1 Clay", ifelse(
+                                         Sample.Name == "MiB1Heavy",
+                                         "Quartz", ifelse(
+                                           Sample.Name == "Le4-1",
+                                           "2:1 Clay + CO", ifelse(
+                                             Sample.Name == "MiB1Bulk",
+                                             "MiB1 Spodosol - Bulk", ifelse(
+                                               Sample.Name == "SA742",
+                                               "Mixed Clay + Quartz", ifelse(
+                                                 Sample.Name == "SA776",
+                                                 "1:1 Clay + Quartz", ifelse(
+                                                   Sample.Name == "GRwf",
+                                                   "Mafic PM + CO", ifelse(
+                                                     Sample.Name == "BSwf",
+                                                     "Felsic PM + Mixed Clay", ifelse(
+                                                       Sample.Name == "ANwf",
+                                                       "Int. PM + SRO",
+                                                       Sample.Name))))))))))) -> re.index
+
+
+re.index %>% 
+  select(Sample.Name, A1, A2, A3, A4) %>% 
+  reshape2::melt(id.vars = "Sample.Name") %>% 
+  ggplot(aes(x = Sample.Name, y = value, color = Sample.Name, shape = Sample.Name)) + geom_point(size = 5) + facet_wrap(~variable, scales = 'free_y') +
+  scale_color_manual(values = MinCols) + theme_bw() + scale_shape_manual(values = MinShapes) + theme(axis.text.x = element_blank())
+
+re.index %>% 
+  dplyr::rename("Sample Name" = Sample.Name) %>% 
+ggplot(aes(y = I.index, x = R.index, color = `Sample Name`, shape = `Sample Name`)) + theme_bw() +
+  #geom_hline(yintercept = 0, lty = 2) +
+  geom_point(size = 5) + 
+  scale_color_manual(values = MinCols) + scale_shape_manual(values = MinShapes) +
+  theme(strip.text.x = element_text(size=11, face = "bold"),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 13),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12)) +
+  ylab("I-index") + xlab("R-index") #+
+  #ggtitle("Rock Eval SOM Indices")
+```
+
+```{r PCA - Version 1, echo=FALSE}
+totDat1 <- totDat[match(unique(totDat$Sample.Name.N), totDat$Sample.Name.N),]
+
+totDat1$id <- seq(1:length(unique(totDat1$Sample.Name.N)))
+
+### Combine depth-corrected Fm
+totDat1 <- left_join(totDat1, depthFm, by = c("Sample.Name.N" = "pro_name"))
+
+totDat1 <- dplyr::select(totDat1, c('id', "slopeFm", "wtd_slope13",
+                           "E_max","uE","sdE", "Fm_est",
+                           "Organic.C....","pH","Fe.dith",
+                           "Fe.ox", "Al.ox","Clay","Kaolin","Feldspar","Quartz",
+                           "Smectite"))
+
+totDat1 <- totDat1[,1:length(colnames(totDat1))]
+
+totDat1 <- sapply(totDat1[,2:length(colnames(totDat1))], as.numeric)
+
+min.pca <- prcomp(totDat1, center = TRUE, scale.=TRUE)
+summary(min.pca)
+
+ggbiplot(min.pca) + theme_bw()
+
+min.pcaR <- prcomp(totDat1, center = TRUE, scale.=TRUE, retx = TRUE)
+summary(min.pcaR)
+
+```
+
+```{r PCA Version 2 - Setup, echo=FALSE, message=FALSE, warning=FALSE}
+### Adding py-GC/MS data
+py %>%
+  dplyr::filter(HighT != LowT) %>% #View()
+  group_by(Sample.Name.N, Frac_No, Origin) %>% #glimpse()
+  dplyr::summarise(Area = sum(Area.Pct)) %>% #glimpse()
+  pivot_wider(names_from = Origin,
+              id_cols = c(Sample.Name.N, Frac_No),
+              values_from = Area) %>% # -> fart
+  merge(totDat, by = c("Sample.Name.N" = "Sample.Name.N", "Frac_no" = "Frac_No"), all = TRUE) -> totPydf
+
+py %>%
+  dplyr::filter(HighT != LowT) %>% #View()
+  group_by(Sample.Name.N, Frac_No, Origin) %>% #View()
+  dplyr::summarise(Area = sum(Area.Pct)) %>% #View()
+  pivot_wider(names_from = Origin,
+              id_cols = c(Sample.Name.N, Frac_No),
+              values_from = Area) %>% # -> fart
+  merge(totDat, by = c("Sample.N" = "Sample.Name.N", "Frac_No" = "Frac_No"), all = TRUE) %>% 
+  dplyr::filter(Sample.Name.N %notin% c("Int. PM + SRO", "Felsic PM + Mixed Clay", "Mafic PM + CO")) %>%
+  dplyr::select(c("Sample.Name.N", "Frac_No", "slopeFm","slope13",
+                           "wtd_slopeFm", "wtd_slope13",
+                           "E_max","uE","sdE", "GPP",
+                           "Organic.C....","pH","Fe.dith",
+                           "Fe.ox", "Al.ox","Smectite","Kaolin","Feldspar","Quartz",
+                           #"Clay",
+                           #"ARO", "LIP", "N", "PAH", "S", "PS", 
+                           "RE_S1", "RE_S2","RE_S3","RE_HI","RE_OI","RE_Tmax", "RE_S1TOC")) %>% #View()
+  group_by(Sample.Name.N) %>% #View()
+  # dplyr::mutate(ARO = coalesce(ARO, 0),
+  #               LIP = coalesce(LIP, 0),
+  #               PAH = coalesce(PAH, 0),
+  #               N = coalesce(N, 0),
+  #               S = coalesce(S, 0),
+  #               PS = coalesce(PS, 0)) %>% #View()
+  dplyr::mutate(Frac_No_1 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Frac_No_2 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Frac_No_3 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Frac_No_4 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Frac_No_5 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Frac_No_6 = rep(1:5,length(unique(Sample.Name.N)))) %>%
+  dplyr::mutate(Fe_cr = Fe.dith - Fe.ox) %>% 
+  # pivot_wider(names_from = Frac_No_1, values_from = ARO, names_glue = "ARO_{Frac_No_1}") %>% #View()
+  # pivot_wider(names_from = Frac_No_2, values_from = LIP, names_glue = "LIP_{Frac_No_2}") %>%
+  # pivot_wider(names_from = Frac_No_3, values_from = N, names_glue = "N_{Frac_No_3}") %>%
+  # pivot_wider(names_from = Frac_No_4, values_from = PAH, names_glue = "PAH_{Frac_No_4}") %>% #View()
+  # pivot_wider(names_from = Frac_No_5, values_from = S, names_glue = "S_{Frac_No_5}") %>% #View()
+  # pivot_wider(names_from = Frac_No_6, values_from = PS, names_glue = "PS_{Frac_No_6}") %>% #View()
+  # dplyr::mutate(across(ARO_1:PS_5, sum, na.rm = TRUE,
+  #                        .names = "{col}")) %>% #View() #, .groups = "keep")
+  full_join(depthFm, by = c("Sample.Name.N" = "pro_name")) %>% 
+  dplyr::select(!Frac_No) %>% #View()
+  distinct() -> minpyAll
+
+totPydf %>% 
+  full_join(depthFm, by = c("Sample.Name.N" = "pro_name")) %>% #glimpse()
+  full_join(re.index, by = c("Sample.Name.N" = "Sample.Name")) %>% #glimpse()
+  dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk")) %>% 
+  dplyr::mutate(`1:1` = (Clay / 100) * Kaolin) %>% 
+  dplyr::mutate(`2:1` = (Clay / 100) * (Smectite + Chlorite)) %>% 
+  dplyr::mutate(Smectite = Smectite * (Clay / 100)) %>% 
+  dplyr::mutate(Kaolin = Kaolin * (Clay / 100)) %>% 
+  dplyr::mutate(Chlorite = Chlorite * (Clay / 100)) %>% 
+  dplyr::mutate(`Organic C` = Organic.C....) %>% #glimpse()
+  dplyr::select(c("Sample.Name.N", "slopeFm","slope13",
+                                     #"wtd_slope13", #"wtd_slopeFm",
+                                    #"2:1", "1:1",
+                                    "E_max","uE","sdE", "GPP","Kaolin","Smectite", "Chlorite",
+                                    "Organic C","pH","Fe.dith",
+                                    "Fe.ox", "Al.ox","Clay","Feldspar","Quartz",
+                                    'Fm_est', "I.index", "R.index",
+                                    #"ARO", "LIP", "N", "PAH", "S", "PS", 
+                                    "RE_OI", "RE_HI")) %>% 
+                                    #"RE_S1", "RE_S2","RE_S3","RE_HI","RE_OI","RE_Tmax", "RE_S1TOC")) %>%
+  dplyr::rename("Fm DC" = Fm_est) %>% 
+  dplyr::filter(Sample.Name.N != "Laupahoehoe") %>%  
+    dplyr::mutate(slopeFm = abs(slopeFm)) %>% 
+    dplyr::mutate(Fe.cr = Fe.dith - Fe.ox) -> totPydf_pca
+    # dplyr::mutate(ARO = coalesce(ARO, 0),
+    #             LIP = coalesce(LIP, 0),
+    #             PAH = coalesce(PAH, 0),
+    #             N = coalesce(N, 0),
+    #             S = coalesce(S, 0),
+    #             PS = coalesce(PS, 0)) -> totPydf_pca
+
+## Reduced?
+totPydf %>% 
+  full_join(depthFm, by = c("Sample.Name.N" = "pro_name")) %>% #glimpse()
+  full_join(re.index, by = c("Sample.Name.N" = "Sample.Name")) %>% #glimpse()
+  full_join(SI) %>% 
+  full_join(T450) %>% #glimpse()
+  dplyr::rename("T450" = `Frac. Prop`) %>% #glimpse()
+  dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk")) %>% 
+  dplyr::mutate(`1:1` = (Clay / 100) * Kaolin) %>% 
+  dplyr::mutate(`2:1` = (Clay / 100) * (Smectite + Chlorite)) %>% 
+  dplyr::mutate(Smectite = Smectite * (Clay / 100)) %>% 
+  dplyr::mutate(Kaolin = Kaolin * (Clay / 100)) %>% 
+  dplyr::mutate(Chlorite = Chlorite * (Clay / 100)) %>% 
+  dplyr::mutate(Fm_est = Fm_est) %>% 
+  dplyr::mutate(`Organic C` = Organic.C....) %>% #glimpse()
+  dplyr::mutate(CN = `Organic C` / TN) %>% 
+  dplyr::select(c("Sample.Name.N", "slopeFm",#"slope13",
+                                     #"wtd_slope13", #"wtd_slopeFm",
+                                    #"2:1", "1:1",
+                                    "uE","sdE","Kaolin","Smectite", "Chlorite", "Shannon", "T450",
+                                    "pH","Fe.dith","CN","Organic C", "TN",
+                                    "Fe.ox", "Al.ox","Clay","Feldspar","Quartz",
+                                    "I.index", "R.index", "Fm_est","Sand",
+                                    #"ARO", "LIP", "N", "PAH", "S", "PS", 
+                                    "RE_OI", "RE_HI")) %>% 
+                                    #"RE_S1", "RE_S2","RE_S3","RE_HI","RE_OI","RE_Tmax", "RE_S1TOC")) %>%
+  #dplyr::rename("Fm DC" = Fm_est) %>% 
+  dplyr::filter(Sample.Name.N != "Laupahoehoe") %>% 
+  dplyr::full_join(dplyr::filter(re.index, Sample.Name %notin% c('MiB1 Spodosol - Bulk'))) %>%
+  dplyr::filter(Sample.Name.N %notin% c("SRO", "CO + 1:1 Clay")) %>% 
+    dplyr::mutate(slopeFm = abs(slopeFm)) %>% 
+    dplyr::mutate(Fe.cr = (Fe.dith - Fe.ox) / Fe.dith) %>% 
+    dplyr::select(-Fe.dith) %>% 
+    dplyr::mutate(Clay = ifelse(Sample.Name.N == "SRO", NA, Clay)) -> totPydf_pca
+    #dplyr::mutate(Fe.ox = Fe.ox / Fe.dith) -> totPydf_pca
+    # dplyr::mutate(ARO = coalesce(ARO, 0),
+    #             LIP = coalesce(LIP, 0),
+    #             PAH = coalesce(PAH, 0),
+    #             N = coalesce(N, 0),
+    #             S = coalesce(S, 0),
+    #             PS = coalesce(PS, 0)) -> totPydf_pca
+```
+
+```{r PCA Version 2, Imputed RE6 variables + Plots}
+
+library(FactoMineR)
+library(missMDA)
+
+#Remove clay from SRO
+
+
+#With CO + 1:1 Clay
+c3.PCA_full <- PCA(imputePCA(totPydf_pca[match(unique(totPydf_pca$Sample.Name.N), 
+                                          totPydf_pca$Sample.Name.N),] %>% dplyr::filter(Sample.Name.N %notin% c("MiB1 Bhs 8 Bulk")) %>% 
+              dplyr::select(!c("Sample.Name", "A1", "A2", "A3", "A4")), #, "ARO", "LIP", "N", "PAH","S", "PS")),#"I.index", "R.index")),
+          quali.sup = which(colnames(totPydf_pca) %in% c("Sample.Name.N")), scale.unit = TRUE)$completeObs,
+    quali.sup = which(colnames(totPydf_pca) %in% c("Sample.Name.N")), scale.unit = TRUE)
+
+c3.PCA <- PCA(imputePCA(totPydf_pca[match(unique(totPydf_pca$Sample.Name.N), 
+                                          totPydf_pca$Sample.Name.N),] %>% dplyr::filter(Sample.Name.N %notin% c("MiB1 Bhs 8 Bulk", "CO + 1:1 Clay")) %>% 
+              dplyr::select(!c("Sample.Name", "A1", "A2", "A3", "A4")),# "ARO", "LIP", "N", "PAH","S", "PS")),#,"I.index", "R.index")),
+          quali.sup = which(colnames(totPydf_pca) %in% c("Sample.Name.N")), scale = TRUE)$completeObs,
+    quali.sup = which(colnames(totPydf_pca) %in% c("Sample.Name.N")), scale.unit = TRUE)
+
+```
+
+
+```{r FactoExtra Plot Beautifcation, echo = FALSE}
+#library("devtools")
+#install_github("kassambara/factoextra", force = TRUE)
+library(factoextra)
+library(broom)
+
+# nameset <- totPydf_pca[match(unique(totPydf_pca$Sample.Name.N), 
+#                   totPydf_pca$Sample.Name.N),] %>% dplyr::filter(Sample.Name.N %notin% c("MiB1 Bhs 8 Bulk", "CO + 1:1 Clay"))
+# nameset <- dplyr::filter(unique(totPydf[1]), Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "CO + 1:1 Clay"))[,1]
+# 
+# dimnames(c3.PCA$ind$coord) = list(nameset, dimnames(c3.PCA$ind$coord)[[2]])
+
+# fviz_pca_biplot(c3.PCA, repel = TRUE, col.var = c(1,1,1,1,1,rep(2, 12), 1,1,1, 2), alpha.var = 0.7, gradient.cols = c("black", "brown3"), 
+#                 col.ind = "steelblue3") +
+#   theme(legend.position = "")
+
+#With CO + 1:1 Clay
+nameset <- totPydf_pca[match(unique(totPydf_pca$Sample.Name.N), 
+                  totPydf_pca$Sample.Name.N),] %>% dplyr::filter(Sample.Name.N %notin% c("MiB1 Bhs 8 Bulk", "SRO", "CO + 1:1 Clay"))
+nameset <- dplyr::filter(unique(totPydf[1]), Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "SRO", "CO + 1:1 Clay"))[,1]
+
+dimnames(c3.PCA_full$ind$coord) = list(nameset, dimnames(c3.PCA_full$ind$coord)[[2]])
+
+fviz_pca_biplot(c3.PCA_full, repel = TRUE, col.var = c(1,1,1,
+                                                       2,2,2,
+                                                       1,1,
+                                                       2,2,2,2,2,2,2,2,2,
+                                                       1,1,1,
+                                                       2,1,
+                                                       1,2), alpha.var = 0.7, gradient.cols = c("black", "brown3"), 
+                col.ind = "steelblue3") +
+  theme(legend.position = "")
+
+
+### Rotating
+#f1 <- t(apply(c3.PCA_full$var$coord, 1, function(x) {x/sqrt(c3.PCA_full$eig[,1])}))
+
+
+```
+
+```{r PCA Version 2, unimputed RE6 indices + Plots}
+# 
+# library(FactoMineR)
+# fPCA <- PCA(totPydf_pca[match(unique(totPydf_pca$Sample.Name.N), totPydf_pca$Sample.Name.N),] %>% dplyr::filter(Sample.Name.N %notin% c("MiB1 Bhs 8 Bulk", "CO + 1:1 Clay")) %>% 
+#               dplyr::select(!c('RE_OI', "RE_HI", "ARO", "LIP", "N", "PAH","S", "PS")),#,"I.index", "R.index")),
+#             quali.sup = which(colnames(totPydf_pca) %in% c("Sample.Name")), scale.unit = TRUE)
+```
+
+```{r Bar Width Fm charts, echo = FALSE, message = FALSE}
+
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = Fm
+isod %>% 
+  drop_na(Fm) %>% 
+  dplyr::filter(!Sample.Name %in% c("SA 776", "SA 742")) %>% 
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% #View()
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(Fm - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, norm, 0)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, norm, 0)) %>% 
+  dplyr::mutate(label = paste(Sample.Name.N, "\n", Mineralogy)) %>% 
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = norm, group = Sample.Name)) + 
+    geom_rect(color = 'black') + 
+    scale_fill_distiller(palette = "Spectral") +
+    theme_bw() +
+    labs(fill = 'Rel. Fm') +
+    facet_wrap(~label)
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = Fm
+isod %>% 
+  drop_na(Fm) %>% 
+  dplyr::filter(!Sample.Name %in% c("SA 776", "SA 742", "MiB1 Spodosol - Bulk")) %>% 
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(Fm - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, w_mean + norm, w_mean)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, w_mean + norm, w_mean)) %>% 
+  #dplyr::mutate(label = paste(Mineralogy, "\n", Sample.Name)) %>% 
+  ungroup() %>% 
+  dplyr::mutate(fake_l = w_mean - max(w_mean - l)) %>% 
+  dplyr::mutate(fake_h = w_mean + max(h - w_mean)) %>%
+  #dplyr::mutate(label = paste(Sample.Name.N)) %>% 
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c( "Quartz", "SRO", "CO + 1:1 Clay","2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz",
+                                                     "Int. PM + SRO", "Felsic PM + Mixed Clay" , "Mafic PM + CO"),
+                                         ordered = TRUE)) %>% 
+  group_by(Sample.Name.N) %>% #dplyr::summarize(norm)
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = Fm)) + 
+    geom_hline(aes(yintercept = w_mean), linetype = 2) +
+    geom_rect(color = 'black') + 
+    scale_fill_distiller(palette = "Spectral") +
+    geom_hline(aes(yintercept = fake_l), color = NA) +
+    geom_hline(aes(yintercept = fake_h), color = NA) +
+    theme_bw() +
+    theme(axis.text = element_text(size = 12),
+          axis.title = element_text(size = 13),
+          #panel.grid = element_blank(),
+          strip.text.x = element_text(size=11, face = "bold"),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12)) +
+    xlab("Cumulative Proportion of C Released") +
+    ylab('Fm') +
+    #scale_fill_gradient2(low = "gray5", high = "red", midpoint = 1) +
+    labs(fill = "Fm") +
+    facet_wrap(~Sample.Name.N, scales = 'free_y')
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = 13C
+isod %>% 
+  drop_na(d13C) %>% 
+  dplyr::filter(!Sample.Name %in% c("SA 776", "SA 742", "MiB1 Spodosol - Bulk")) %>% 
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(d13C = as.numeric(d13C)) %>% 
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% #View() 
+  dplyr::mutate(w_mean = wtd.mean(d13C, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(d13C - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, w_mean + norm, w_mean)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, w_mean + norm, w_mean)) %>% 
+  ungroup() %>% 
+  dplyr::mutate(fake_l = w_mean - max(w_mean - l)) %>% 
+  dplyr::mutate(fake_h = w_mean + max(h - w_mean)) %>%
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(label = paste(Sample.Name.N, "\n", Mineralogy)) %>% 
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = norm)) + 
+    geom_hline(aes(yintercept = w_mean), linetype = 2) +
+    geom_rect(color = 'black') + 
+    scale_fill_distiller(palette = "Spectral") +
+    geom_hline(aes(yintercept = fake_l), color = NA) +
+    geom_hline(aes(yintercept = fake_h), color = NA) +
+    theme_bw() +
+    theme(axis.text = element_text(size =12),
+          axis.title = element_text(size =12),
+          strip.text.x = element_text(size=10)) +
+    xlab("Cumulative Proportion of C Released") +
+    ylab('d13C') +
+    labs(fill = "Rel. d13C") +
+    facet_wrap(~label, scales = 'free_y')
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = 13C
+isod %>% 
+  drop_na(d13C) %>% 
+  #filter(!Sample.Name %in% c("SA 776", "SA 742")) %>% 
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(d13C = as.numeric(d13C)) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(d13C, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(d13C - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, norm, 0)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, norm, 0)) %>% 
+  dplyr::mutate(label = paste(Sample.Name, "\n", Mineralogy)) %>% 
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = norm, group = Sample.Name)) + 
+    geom_rect(color = 'black') + 
+    scale_fill_distiller(palette = "Spectral") +
+    theme_bw() +
+    labs(fill = 'Rel. d13C') +
+    facet_wrap(~label)
+
+### Color break function
+brkr <- function(isos){
+  clz <- c(`0.0` = 'black', `0.1` = 'purple1', `0.2` = 'purple2', `0.3` = 'purple3',`0.4` = 'purple4',#`0.5` = '#053061', `0.6` = '#2166ac',`0.7` = '#4393c3',`0.8` = '#92c5de', `0.9` = '#d1e5f0',
+           `z1.0` = 'gray95',
+           `a1.1` ='#fddbc7', `b1.2` = '#d6604d', `c1.3`= '#67001f')
+
+  clz <- c(
+    `0.0` = 'black', `0.1` = '#4d004b', `0.2` = '#810f7c', #purples
+    `0.3` = '#88419d', `0.4` = '#8c6bb1', `0.5` = '#014636', #greens
+    `0.6` = '#016c59', `0.7` = '#02818a', `0.8` = '#3690c0', #blues
+    `0.9` = '#deebf7', `1.0` = '#f7fbff', #
+    `a1.05` = 'red', `b1.10` = '#f03b20', `c1.15` = '#bd0026'
+  )
+
+  cols = colorRampPalette(clz[1:10])
+  colsO = cols(length(seq(0.0, 1.0, by = 0.005)))
+  cols = colorRampPalette(clz[11:14])
+  colsY = cols(length(seq(1.005, 1.3, by = 0.005)))
+
+  ll <- seq(0.0, 1.0, by = 0.005)
+  mm <- seq(1.005, 1.3, by = 0.005)
+
+  plot(c(ll, mm), col = c(colsO, colsY))
+  abline(,,1)
+
+  bigfmcol <- data.frame(Fm = c(ll,mm),
+                         col = c(colsO, colsY))
+
+  lr <- range(isos)[1]
+  hr <- range(isos)[2]
+  sl <- lm(y~x,
+           data =data.frame(x = range(isos), y = c(0,1)))$coefficients
+
+  brkr <- c(0)
+  selc <- c(bigfmcol[which(abs(lr-bigfmcol$Fm)==min(abs(lr-bigfmcol$Fm)))-1,]$col)
+  nlist <- c(lr)
+  nos = c(seq(0.0, 1.3, by = 0.1))
+  for(x in nos[which(nos >= lr & nos <= hr)]){
+    nlist <- c(nlist, x)
+    selc <- c(selc, bigfmcol[which(abs(x-bigfmcol$Fm)==min(abs(x-bigfmcol$Fm))),]$col)
+    brkr <- c(brkr, (x * sl[2]) + sl[1])
+    if(x == 1.0) x = 'z1.0'
+    if(x == 1.05) x = 'a1.1'
+    if(x == 1.1) x = 'b1.2'
+    if(x == 1.15) x = 'c1.3'
+    #selc <- c(selc, clz[grep(x, names(clz))])
+  }
+  #names(brkr) = c(nos[which(nos > lr & nos < hr)])
+
+  nlist <- c(nlist, hr)
+  brkr <- c(brkr, 1)
+  selc <- c(selc, bigfmcol[which(abs(hr-bigfmcol$Fm)==min(abs(hr-bigfmcol$Fm)))+1,]$col)
+
+  abline(,,nlist, lty = 2)
+
+  return(data.frame(Num = nlist, Break = brkr, col = selc))
+}
+
+isos <- isod$Fm
+brkr(isos)
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = Fm, adjusted to show same window for all except SRO and CO + 1:1 Clay
+isod %>% 
+  drop_na(Fm) %>%# View()
+  dplyr::filter(Sample.Name %in% c("MiB1 Spodosol - Bulk", "MiB1 Spodosol")) %>%# View()
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(Fm - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, w_mean + norm, w_mean)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, w_mean + norm, w_mean)) %>% 
+  #dplyr::mutate(label = paste(Mineralogy, "\n", Sample.Name)) %>% 
+  ungroup() %>% 
+  # dplyr::mutate(fake_l = w_mean - max(w_mean - l)) %>% 
+  # dplyr::mutate(fake_h = w_mean + max(h - w_mean)) %>% glimpse()
+  #dplyr::mutate(label = paste(Sample.Name.N)) %>% 
+  dplyr::mutate(WinGroup = ifelse(Sample.Name.N %notin% c("SRO", "CO + 1:1 Clay"), "Y", ifelse(Sample.Name.N == "SRO", "SRO", "N"))) %>% #glimpse()
+  dplyr::group_by(WinGroup) %>% 
+  dplyr::mutate(fake_h = ifelse(WinGroup == "Y", max(h), w_mean + ((1.04365 - 0.8361) / 2))) %>%  ### Half of the Fm range of non-volcanic soils
+  dplyr::mutate(fake_l = ifelse(WinGroup == "Y", min(l), w_mean - ((1.04365 - 0.8361) / 2))) %>% #glimpse()
+  ungroup() %>% 
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c( "Quartz", "SRO", "CO + 1:1 Clay","2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz",
+                                                     "Int. PM + SRO", "Felsic PM + Mixed Clay" , "Mafic PM + CO"),
+                                         ordered = TRUE)) %>% #glimpse()
+  group_by(Sample.Name.N) %>% #dplyr::summarize(norm)
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = Fm)) + 
+    geom_rect(color = 'black') + 
+  scale_fill_gradientn(colors = brkr(isos)$col,
+                       values = brkr(isos)$Break) +
+    #scale_fill_distiller(palette = "Spectral") +
+    geom_hline(aes(yintercept = fake_l), color = NA) +
+    geom_hline(aes(yintercept = fake_h), color = NA) +
+    geom_hline(aes(yintercept = w_mean), linetype = 2, size = 1.2) +
+    theme_bw() +
+    theme(strip.text.x = element_text(size=12, face = "bold"),
+          axis.text = element_text(size = 13),
+          axis.title = element_text(size = 14),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12),
+          strip.background = element_blank()) +
+    xlab("Cumulative Proportion of C Released") +
+    ylab('Fm') +
+    #scale_fill_gradient2(low = "gray5", high = "red", midpoint = 1) +
+    labs(fill = "Fm") +
+    facet_wrap(~Sample.Name, scales = 'free_y')
+
+# Bar width = proportional size of fraction, order = low to high temp, color and y axis = Fm, adjusted to show same window for all except SRO and CO + 1:1 Clay
+isod %>% 
+  drop_na(Fm) %>% 
+  dplyr::filter(!Sample.Name %in% c("SA 776", "SA 742", "MiB1 Spodosol - Bulk")) %>% 
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(Fm - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, w_mean + norm, w_mean)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, w_mean + norm, w_mean)) %>% 
+  #dplyr::mutate(label = paste(Mineralogy, "\n", Sample.Name)) %>% 
+  ungroup() %>% 
+  # dplyr::mutate(fake_l = w_mean - max(w_mean - l)) %>% 
+  # dplyr::mutate(fake_h = w_mean + max(h - w_mean)) %>% glimpse()
+  #dplyr::mutate(label = paste(Sample.Name.N)) %>% 
+  dplyr::mutate(WinGroup = ifelse(Sample.Name.N %notin% c("SRO", "CO + 1:1 Clay"), "Y", ifelse(Sample.Name.N == "SRO", "SRO", "N"))) %>% #glimpse()
+  dplyr::group_by(WinGroup) %>% 
+  dplyr::mutate(fake_h = ifelse(WinGroup == "Y", max(h), w_mean + ((1.04365 - 0.8361) / 2))) %>%  ### Half of the Fm range of non-volcanic soils
+  dplyr::mutate(fake_l = ifelse(WinGroup == "Y", min(l), w_mean - ((1.04365 - 0.8361) / 2))) %>% #glimpse()
+  ungroup() %>% 
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c( "Quartz", "SRO", "CO + 1:1 Clay","2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz",
+                                                     "Int. PM + SRO", "Felsic PM + Mixed Clay" , "Mafic PM + CO"),
+                                         ordered = TRUE)) %>% #glimpse()
+  group_by(Sample.Name.N) %>% #dplyr::summarize(norm)
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = Fm)) + 
+    geom_rect(color = 'black') + 
+  scale_fill_gradientn(colors = brkr(isos)$col,
+                       values = brkr(isos)$Break) +
+    #scale_fill_distiller(palette = "Spectral") +
+    geom_hline(aes(yintercept = fake_l), color = NA) +
+    geom_hline(aes(yintercept = fake_h), color = NA) +
+    geom_hline(aes(yintercept = w_mean), linetype = 2, size = 1.2) +
+    theme_bw() +
+    theme(strip.text.x = element_text(size=12, face = "bold"),
+          axis.text = element_text(size = 13),
+          axis.title = element_text(size = 14),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12),
+          strip.background = element_blank()) +
+    xlab("Cumulative Proportion of C Released") +
+    ylab('Fm') +
+    #scale_fill_gradient2(low = "gray5", high = "red", midpoint = 1) +
+    labs(fill = "Fm") +
+    facet_wrap(~Sample.Name.N, scales = 'free_y')
+
+
+```
+
+```{r Calculate percent within a given transit time, echo = FALSE, message = FALSE}
+# Code originally from Sue Trumbore, with modifications for forecasting atm 14C from Carlos Sierra
+TT=600 ###  Put in the value of the TT in years you wish to use (in years)
+
+#### R Code for determining the 14C of a steady state homogeneous, one-pool model
+##### uses the SoilR package and the Hua et al. (2013) Curve for the Southern Hemisphere
+### First, install the SoilR package. 
+
+##### Load the SoilR library
+
+library(SoilR)
+library(forecast)
+d14 <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/DepthCorr14C.csv')
+d14$Sample <- factor(d14$Sample)
+
+d14 %>% 
+  .[match(unique(d14$Sample), d14$Sample),] %>% 
+  dplyr::select(Sample, obs_date_y) -> tt.df
+
+#Bind the IntCal13 dataset and Hua2013 for the Southern Hemisphere Zones 1,2
+# This produces the atmospheric 14C record from 50,000 BP to 2010 in Years AD
+
+ad=bind.C14curves(prebomb=IntCal13,postbomb=Hua2013$SHZone12,time.scale="AD")
+
+#And now we'll forecast atmospheric 14C
+#From Carlos' vignette
+preandpost=bind.C14curves(prebomb=IntCal13,postbomb=Hua2013$NHZone2,time.scale="AD")
+bombcurve=preandpost[preandpost[,1]>=500,1:2]
+#plot(bombcurve[,1:2],type="l")
+
+yrs=seq(1966,2009.5,by=1/4) # A series of years by quarters
+nz2=spline(Hua2013$NHZone2[,c(1,4)],xout=yrs) #Spline interpolation of the NH_Zone 2 dataset at a quaterly basis
+nhz2=ts((nz2$y-1)*1000,start=1966,freq=4) #Transformation into a time-series object
+
+m=ets(nhz2) #Fits an exponential smoothing state space model to the time series
+f2=forecast(m,h=11*4) #Uses the fitted model to forecast 11 years into the future
+
+ad=data.frame(Year=c(bombcurve[-dim(bombcurve)[1],1],
+                     seq(tsp(f2$mean)[1],tsp(f2$mean)[2], by=1/tsp(f2$mean)[3])),
+              Delta14C=c(bombcurve[-dim(bombcurve)[1],2],as.numeric(f2$mean)))
+# tail(ad)
+# plot(ad,type="l")
+# ## Plot the atmospheric record
+# plot(ad[,1:2],type="l")
+# plot(ad[,1:2],type="l",xlim=c(0,2010))
+# abline(v=1950,lty=2)
+
+####### To estimate the Value of 14C as a function of time for a given Turnover time (TT)
+## Example given is for 50 year TT (you can change the value as needed)
+
+for(i in seq(1,length(tt.df[,1]))){
+  
+  ### Other factors will be calculated to make sure model is at steady state
+  k1=1/TT   ### k1 is the decomposition rate (1/TT) in 1/yr
+  la = 1/8267 ### la is the radio-decay constant for radiocarbon 1/mean life
+  Fz = k1/(k1+la)     ### Steady state pre-bomb estimate of the Absolute Fraction Modern (see Sierra et al. 2014)
+  DFz = 1000*(Fz-1)   ### Expressed as Delta 14C
+  
+  par(mfrow = c(1,1))
+  ##### Other model inputs are calculated so as to have the model remain at steady state
+  LitterInput=10   # arbitrary inputs
+  Cinit=LitterInput*TT  #  Inventory at steady state = initial Cinventory (arbitrary units)
+  ####  Next step is to run the model
+  ## In SoilR the one pool model is a function that can be called
+  years=seq(1901,tt.df$obs_date_y[i],by=0.5)   # time scale for running the model (expressed in years AD)
+  Ex=OnepModel14(t=years,k=k1,C0=Cinit,F0=DFz,In=LitterInput, inputFc=ad)   #Soil R model function
+  C14t=getF14(Ex)   # Extracts 14C for each year
+  Ct=getC(Ex)    # Extracts C inventory for each year (check for steady state)
+  DEL = tail(C14t, 1) # This extracts the 14C signature in the year 2010
+  ## Next steps make a plot of 14C versus year
+  # plot(ad,type="l",xlab="Year",ylab="Delta 14C (per mil)",xlim=c(1940,2020), main = as.character(tt.df$Sample[i])) 
+  # lines(years, C14t[,1], col=4)
+  # points(tt.df$obs_date_y[i], DEL,  cex=1.5)
+  # legend(
+  #   "topright",
+  #   c("Delta 14C Atmosphere", "Delta 14C in SOM"),
+  #   lty=c(1,1),
+  #   col=c(1,4),
+  #   lwd=c(1,1),
+  #   bty="n"
+  # )
+  
+  #####
+  tt.df$ttCut14[i] <- as.numeric(DEL)  #This line will return only the Del14C for the year 2010 (to be compared with the measured value)
+  #########
+  #########
+}
+par(mfrow = c(1,1))
+
+tt.df$ttCutFm = convert_fm_d14c(d14c = tt.df$ttCut14, obs_date_y = tt.df$obs_date_y, verbose = FALSE)
+print(tt.df)
+
+#Plot for ref
+bind_rows(.id = 'sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "Laupahoehoe" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay" = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>%
+  #dplyr::select(c(sample, MPS_Fm, Area)) %>%
+  ggplot(aes(x = NCub_Fm, y = ..density.., color = sample, weight=abs(Area))) +
+    geom_vline(xintercept = tt.df$ttCutFm, linetype = 2, size = 1.3) +
+    scale_color_manual(values = MinCols) +
+    geom_freqpoly(size = 1.2, adjust = 1, binwidth = 0.01) +
+    theme_bw() + xlim(0.08,1.1) +
+    theme(legend.position = 'bottom') +
+    ggtitle("Fm Distributions :: Natural Cubic Spline Interpolation") +
+    xlab('Radiocarbon (Fm') + labs(color="") +
+    theme(axis.text = element_text(size =16),
+          axis.title = element_text(size =16),
+          legend.text = element_text(size = 9.5))
+
+bind_rows(.id = 'sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "Laupahoehoe" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay" = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>% 
+  inner_join(tt.df, by = c("sample" = "Sample")) %>% 
+  group_by(sample) %>% 
+  dplyr::mutate(totArea = sum(Area)) %>% #glimpse()
+  dplyr::filter(NCub_Fm > ttCutFm) %>% 
+  dplyr::summarize(PerUnderTT = 100 * round(sum(Area),3))
+```
+
+``` {r One Pool for each fraction, include = FALSE, echo = FALSE}
+
+# Code originally from Sue Trumbore, with modifications for forecasting atm 14C from Carlos Sierra
+TT=600 ###  Put in the value of the TT in years you wish to use (in years)
+
+#### R Code for determining the 14C of a steady state homogeneous, one-pool model
+##### uses the SoilR package and the Hua et al. (2013) Curve for the Southern Hemisphere
+### First, install the SoilR package. 
+
+##### Load the SoilR library
+
+library(SoilR)
+library(forecast)
+# d14 <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/DepthCorr14C.csv')
+# d14$Sample <- factor(d14$Sample)
+
+
+isod %>% 
+  #.[match(unique(Sample.Name.N), Sample.Name.N),] %>% glimpse()
+  dplyr::select(Sample.Name.N, obs_date_y) -> tt.df
+
+#Bind the IntCal13 dataset and Hua2013 for the Southern Hemisphere Zones 1,2
+# This produces the atmospheric 14C record from 50,000 BP to 2010 in Years AD
+
+ad=bind.C14curves(prebomb=IntCal13,postbomb=Hua2013$SHZone12,time.scale="AD")
+
+#And now we'll forecast atmospheric 14C
+#From Carlos' vignette
+preandpost=bind.C14curves(prebomb=IntCal13,postbomb=Hua2013$NHZone2,time.scale="AD")
+bombcurve=preandpost[preandpost[,1]>=500,1:2]
+#plot(bombcurve[,1:2],type="l")
+
+yrs=seq(1966,2009.5,by=1/4) # A series of years by quarters
+nz2=spline(Hua2013$NHZone2[,c(1,4)],xout=yrs) #Spline interpolation of the NH_Zone 2 dataset at a quaterly basis
+nhz2=ts((nz2$y-1)*1000,start=1966,freq=4) #Transformation into a time-series object
+
+m=ets(nhz2) #Fits an exponential smoothing state space model to the time series
+f2=forecast(m,h=13*4) #Uses the fitted model to forecast 13 years into the future
+
+ad=data.frame(Year=c(bombcurve[-dim(bombcurve)[1],1],
+                     seq(tsp(f2$mean)[1],tsp(f2$mean)[2], by=1/tsp(f2$mean)[3])),
+              Delta14C=c(bombcurve[-dim(bombcurve)[1],2],as.numeric(f2$mean)))
+
+
+# tail(ad)
+# plot(ad,type="l")
+# ## Plot the atmospheric record
+# plot(ad[,1:2],type="l")
+# plot(ad[,1:2],type="l",xlim=c(0,2010))
+# abline(v=1950,lty=2)
+
+####### To estimate the Value of 14C as a function of time for a given Turnover time (TT)
+## Example given is for 50 year TT (you can change the value as needed)
+
+for(i in seq(1,length(tt.df[,1]))){
+  print(i)
+  ### Other factors will be calculated to make sure model is at steady state
+  k1=1/TT   ### k1 is the decomposition rate (1/TT) in 1/yr
+  la = 1/8267 ### la is the radio-decay constant for radiocarbon 1/mean life
+  Fz = k1/(k1+la)     ### Steady state pre-bomb estimate of the Absolute Fraction Modern (see Sierra et al. 2014)
+  DFz = 1000*(Fz-1)   ### Expressed as Delta 14C
+  
+  par(mfrow = c(1,1))
+  ##### Other model inputs are calculated so as to have the model remain at steady state
+  LitterInput=10   # arbitrary inputs
+  Cinit=LitterInput*TT  #  Inventory at steady state = initial Cinventory (arbitrary units)
+  ####  Next step is to run the model
+  ## In SoilR the one pool model is a function that can be called
+  years=seq(1901,tt.df$obs_date_y[i],by=0.5)   # time scale for running the model (expressed in years AD)
+  Ex=OnepModel14(t=years,k=k1,C0=Cinit,F0=DFz,In=LitterInput, inputFc=ad)   #Soil R model function
+  C14t=getF14(Ex)   # Extracts 14C for each year
+  Ct=getC(Ex)    # Extracts C inventory for each year (check for steady state)
+  DEL = tail(C14t, 1) # This extracts the 14C signature in the year 2010
+  ## Next steps make a plot of 14C versus year
+  # plot(ad,type="l",xlab="Year",ylab="Delta 14C (per mil)",xlim=c(1940,2020), main = as.character(tt.df$Sample[i])) 
+  # lines(years, C14t[,1], col=4)
+  # points(tt.df$obs_date_y[i], DEL,  cex=1.5)
+  # legend(
+  #   "topright",
+  #   c("Delta 14C Atmosphere", "Delta 14C in SOM"),
+  #   lty=c(1,1),
+  #   col=c(1,4),
+  #   lwd=c(1,1),
+  #   bty="n"
+  # )
+  
+  #####
+  tt.df$ttCut14[i] <- as.numeric(DEL)  #This line will return only the Del14C for the year 2010 (to be compared with the measured value)
+  #########
+  #########
+}
+par(mfrow = c(1,1))
+
+tt.df$ttCutFm = convert_fm_d14c(d14c = tt.df$ttCut14, obs_date_y = tt.df$obs_date_y, verbose = FALSE)
+print(tt.df)
+
+#Plot for ref
+bind_rows(.id = 'sample',
+          "CO + 1:1 Clay" = LSAG113_dist[[3]],
+          "Laupahoehoe" = LSAG69_dist[[3]],
+          "2:1 Clay + CO" = Le4_dist[[3]],
+          #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+          "Quartz" = MiHeavy_dist[[3]],
+          "Mafic PM + CO" = GR_dist[[3]],
+          "Int. PM + SRO" = AN_dist[[3]],
+          "Felsic PM + Mixed Clay" = BS_dist[[3]],
+          "Mixed Clay + Quartz" = SA742_dist[[3]],
+          "1:1 Clay + Quartz" = SA776_dist[[3]]) %>%
+  #dplyr::select(c(sample, MPS_Fm, Area)) %>%
+  ggplot(aes(x = NCub_Fm, y = ..density.., color = sample, weight=abs(Area))) +
+    geom_vline(xintercept = tt.df$ttCutFm, linetype = 2, size = 1.3) +
+    scale_color_manual(values = MinCols) +
+    geom_freqpoly(size = 1.2, adjust = 1, binwidth = 0.01) +
+    theme_bw() + xlim(0.08,1.1) +
+    theme(legend.position = 'bottom') +
+    ggtitle("Fm Distributions :: Natural Cubic Spline Interpolation") +
+    xlab('Radiocarbon (Fm') + labs(color="") +
+    theme(axis.text = element_text(size =16),
+          axis.title = element_text(size =16),
+          legend.text = element_text(size = 9.5))
+
+# bind_rows(.id = 'sample',
+#           "CO + 1:1 Clay" = LSAG113_dist[[3]],
+#           "Laupahoehoe" = LSAG69_dist[[3]],
+#           "2:1 Clay + CO" = Le4_dist[[3]],
+#           #"MiB1 Spodosol - Bulk" = MiBulk_dist[[3]],
+#           "Quartz" = MiHeavy_dist[[3]],
+#           "Mafic PM + CO" = GR_dist[[3]],
+#           "Int. PM + SRO" = AN_dist[[3]],
+#           "Felsic PM + Mixed Clay" = BS_dist[[3]],
+#           "Mixed Clay + Quartz" = SA742_dist[[3]],
+#           "1:1 Clay + Quartz" = SA776_dist[[3]]) %>% glimpse()
+#   inner_join(tt.df, by = c("sample" = "Sample")) %>% 
+#   group_by(sample) %>% 
+#   dplyr::mutate(totArea = sum(Area)) %>% #glimpse()
+#   dplyr::filter(NCub_Fm > ttCutFm) %>% 
+#   dplyr::summarize(PerUnderTT = 100 * round(sum(Area),3))
+
+```
+
+
+``` {r One pools from paper plots, include = FALSE}
+
+oneP<-read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter3/OnePoolsTable.csv')
+
+oneP %>% 
+  group_by(Sample) %>% 
+  dplyr::mutate(h_csum = cumsum(Fr..Prop.)) %>% 
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Fr..Prop)) %>% 
+
+isod %>% 
+  drop_na(Fm) %>% 
+  dplyr::filter(!Sample.Name %in% c("SA 776", "SA 742", "MiB1 Spodosol - Bulk")) %>% #glimpse()
+  dplyr::left_join(oneP, by = c("Sample.Name.N" = "Sample")) %>% glimpse()
+  group_by(Sample.Name) %>% 
+  dplyr::mutate(h_csum = cumsum(Prop_TG_init)) %>%
+  dplyr::mutate(l_csum = c(0, h_csum[1:4])) %>% 
+  dplyr::mutate(w_mean = wtd.mean(Fm, weights = Prop_TG_init)) %>% 
+  dplyr::mutate(norm = as.numeric(Fm - w_mean)) %>% 
+  dplyr::mutate(h = ifelse(norm > 0, w_mean + norm, w_mean)) %>% 
+  dplyr::mutate(l = ifelse(norm < 0, w_mean + norm, w_mean)) %>% glimpse()
+  #dplyr::mutate(label = paste(Mineralogy, "\n", Sample.Name)) %>% 
+  ungroup() %>% 
+  # dplyr::mutate(fake_l = w_mean - max(w_mean - l)) %>% 
+  # dplyr::mutate(fake_h = w_mean + max(h - w_mean)) %>% glimpse()
+  #dplyr::mutate(label = paste(Sample.Name.N)) %>% 
+  dplyr::mutate(WinGroup = ifelse(Sample.Name.N %notin% c("SRO", "CO + 1:1 Clay"), "Y", ifelse(Sample.Name.N == "SRO", "SRO", "N"))) %>% #glimpse()
+  dplyr::group_by(WinGroup) %>% 
+  dplyr::mutate(fake_h = ifelse(WinGroup == "Y", max(h), w_mean + ((1.04365 - 0.8361) / 2))) %>%  ### Half of the Fm range of non-volcanic soils
+  dplyr::mutate(fake_l = ifelse(WinGroup == "Y", min(l), w_mean - ((1.04365 - 0.8361) / 2))) %>% #glimpse()
+  ungroup() %>% 
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                         levels = c( "Quartz", "SRO", "CO + 1:1 Clay","2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz",
+                                                     "Int. PM + SRO", "Felsic PM + Mixed Clay" , "Mafic PM + CO"),
+                                         ordered = TRUE)) %>% #glimpse()
+  group_by(Sample.Name.N) %>% #dplyr::summarize(norm)
+  ggplot(aes(xmin = l_csum, xmax = h_csum, ymin = l, ymax = h, fill = Fm)) + 
+    geom_rect(color = 'black') + 
+  scale_fill_gradientn(colors = brkr(isos)$col,
+                       values = brkr(isos)$Break) +
+    #scale_fill_distiller(palette = "Spectral") +
+    geom_hline(aes(yintercept = fake_l), color = NA) +
+    geom_hline(aes(yintercept = fake_h), color = NA) +
+    geom_hline(aes(yintercept = w_mean), linetype = 2, size = 1.2) +
+    theme_bw() +
+    theme(strip.text.x = element_text(size=12, face = "bold"),
+          axis.text = element_text(size = 13),
+          axis.title = element_text(size = 14),
+          legend.text = element_text(size = 11),
+          legend.title = element_text(size = 12),
+          strip.background = element_blank()) +
+    xlab("Cumulative Proportion of C Released") +
+    ylab('Fm') +
+    #scale_fill_gradient2(low = "gray5", high = "red", midpoint = 1) +
+    labs(fill = "Fm") +
+    facet_wrap(~Sample.Name.N, scales = 'free_y')
+
+```
+
+```{r Rate and Sand dilution supplementary figures, echo = FALSE}
+
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/SoliTOC/StandardRates/SplineFigs')
+
+ratz <- data.frame(matrix(ncol = 4))
+colnames(ratz) = c('temp', 'Moving.', "name", "Norm")
+
+for(i in list.files(pattern = "smooth")){
+  dat = read.csv(i)
+  dat$name = unlist(strsplit( strsplit(i, "_")[[1]][2], ".csv")[[1]])
+  ratz = rbind(ratz, data.frame(temp = dat$temp, `Moving.` = dat$Moving., name = dat$name, Norm = dat$Moving. / max(dat$Moving.)))
+}
+
+
+ratz %>% 
+  dplyr::filter(name %in% c("10", "15", "20", "30", "40")) %>% 
+ggplot(aes(x = temp, y = Norm, color = name)) +
+  theme_bw() +
+  xlab("Temparature (˚C)") + 
+  ylab("Normalized C Release") +
+  geom_line(size = 1.3, alpha = 0.8) +
+  labs(color = "Rate (˚C per min)", size = 12) + 
+  theme(axis.text = element_text(size = 12), axis.title = element_text(size = 13),
+        legend.text = element_text(size = 12))
+
+rate_mod <- lm(Norm ~ name*temp, ratz %>% dplyr::filter(name %in% c("08","10", "15", "20", "30", "40")))
+print(summary(rate_mod))
+
+### Sand Dilution
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Methods/SoliTOC_tests/SandDilutions/smooths/Fifteen')
+
+ratz = data.frame(matrix(ncol = 3))
+colnames(ratz) = c('Temp', "normal", "Name")
+
+i = 1
+for(x in list.files(full.names = T, pattern = '.csv')){
+  if(i == 1){
+    gr = read.csv(x)
+    gr$normal = gr$Moving. / max(gr$Moving.)
+    #plot(gr$temp, gr$normal, type = 'l', xlim = c(150, 800), ylim = c(0,1))
+    ratz = rbind(ratz, data.frame(Temp = gr$temp, normal = gr$normal, Name = paste(strsplit(x, "_")[[1]][2], "%")))
+  }
+  gr <- read.csv(x)
+  gr$normal = gr$Moving. / max(gr$Moving.)
+  #lines(gr$temp, gr$normal, col = colorlist[i], lwd = 2)
+  i = i + 1
+  ratz = rbind(ratz, data.frame(Temp = gr$temp, normal = gr$normal, Name = paste(strsplit(x, "_")[[1]][2], "%")))
+}
+#legend('topright', legend = list.files(pattern = '.csv'), col = colorlist, lwd = 2, cex = 0.7)
+ratz = ratz[-1,]
+
+ratz %>% 
+  dplyr::filter(Name != "05 %") %>% #glimpse()
+ggplot(aes(x = Temp, y = normal, color = Name)) + theme_bw() +
+  xlim(140,600) +
+  xlab("Temperature (˚C)") +
+  ylab("Normalized C Release") +
+  theme(axis.text = element_text(size = 12), axis.title = element_text(size = 13),
+        legend.text = element_text(size = 12)) +
+  labs(color = "Final C Conc.") +
+  geom_line(size = 1.4, alpha = 0.8)
+
+### Significance Check
+dil <- read.csv('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/Thesis/Chapter2/DilutionCalcData.csv')
+dil_mod <- lm(Temp ~ Dilution * Percentile, dil)
+summary(dil_mod)
+
+### Variability calcs
+# plot with 1 std
+setwd('/Users/shane/14Constraint Dropbox/Shane Stoner/IMPRS/ThermalAnalysis/Methods/soliTOC_variability/Dec2021')
+
+stns <- data.frame(matrix(ncol = 3))
+colnames(stns) <- c('temp', 'norm', 'Num')
+
+for(x in list.files(pattern = 'RPO.csv')){
+  dat <- read.csv(x)
+  dat$norm <- dat$Moving / max(dat$Moving)
+  dat$Num <- strsplit(strsplit(x, "_")[[1]][2], "n")[[1]][2]
+
+  stns <- rbind(stns, data.frame(temp = dat$temp, norm = dat$norm, Num = dat$Num))
+}
+
+stns <- stns[-1,]
+
+stns %>%
+  dplyr::group_by(temp) %>%
+  dplyr::mutate(Mean = mean(norm)) %>%
+  dplyr::mutate(std = sd(norm)) %>% #View()
+  ungroup() %>%
+  dplyr::filter(Num == 1) %>% 
+  dplyr::mutate(std_h = Mean + std) %>%
+  dplyr::mutate(std_l = Mean - std) %>% #View()
+  dplyr::filter(temp > 100 & temp < 795) %>% #glimpse()
+  select(Mean, temp, std_h, std_l) %>% 
+  merge(data.frame(temp = seq(100, 795)), all.y = TRUE) %>% #glimpse() %>% 
+  dplyr::mutate(mean_sp = na.spline(Mean)) %>%  #glimpse()
+  dplyr::mutate(stdlow_sp = na.spline(std_l)) %>%
+  dplyr::mutate(stdhigh_sp = na.spline(std_h)) %>%
+ggplot(aes(x = temp, y = mean_sp)) +
+  geom_ribbon(aes(x = temp, ymin = stdlow_sp, ymax = stdhigh_sp), fill = 'steelblue2', color = 'steelblue')+
+  geom_line(size = 1.3, alpha = 0.8, color = "brown3") +
+  theme_bw() + xlab("Temperature (˚C)") + ylab("Normalized C Release") + 
+    theme(axis.text = element_text(size = 12), axis.title = element_text(size = 13),
+        legend.text = element_text(size = 12), legend.position = 'right')
+
+```
+
+```{r Quartz + Bulk comparison figures}
+
+isod %>% 
+  dplyr::filter(Sample.Name %in% c("MiB1 Spodosol - Bulk", "MiB1 Spodosol")) %>% #glimpse()
+  dplyr::rename("Proportion of C" = Prop_TG_init) %>% 
+  ggplot(aes(x = Med_Temp, y = Fm, color = Sample.Name, size = `Proportion of C`, yintercept = prop_Fm)) + geom_point() + geom_line(size = 1.2, alpha = 0.8) +
+  scale_color_manual(values = c('#969696', 'black')) + geom_hline(aes(yintercept = prop_Fm, color = Sample.Name), size = 1.2, linetype = 2) +
+  theme_bw() + xlab('Median Fraction Temperature (˚C)') +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13)
+  )
+
+py %>%
+  #filter(Sample == "Le4-1") %>%
+  dplyr::filter(HighT != 400) %>%
+  dplyr::filter(Origin %notin% c("CONT", "")) %>%
+  dplyr::filter(Sample.Name %in% c("MiB1 Spodosol - Bulk", "MiB1 Spodosol")) %>% 
+  #dplyr::mutate(Sample.Name.N = factor(Sample.Name, ordered = TRUE)) %>% 
+  dplyr::mutate(Origin = factor(Origin, levels = c("Polysaccharide", "Lipid", "Alkane",  "N-Bearing", "S-Bearing","Aromatic", "PAH", "Other"))) %>% 
+  dplyr::mutate(Origin_abb = factor(Origin, levels = c("PS", "LIP", "ALK", "ARO", "PAH", "N", "S", "OTHER"))) %>%
+  #dplyr::mutate(midT = as.numeric(((HighT + LowT) / 2))) %>%
+  #group_by(Sample) %>% #View()
+  dplyr::full_join(isod, by = "Sample.Name.N") %>% #glimpse()
+  dplyr::filter(Sample.Name.N %notin% c("MiB1 Spodosol - Bulk", "Felsic PM + Mixed Clay")) %>% 
+  dplyr::group_by(Sample.Name.N, E_mean, E_std, Origin) %>% #View()#, E_lower, E_upper) %>% View()
+  dplyr::summarise(n = sum(Area.Pct), E_lower, E_upper) %>% #View()
+  dplyr::distinct(.keep_all = TRUE) %>% #View()
+  dplyr::group_by(Sample.Name.N, E_mean, E_std) %>% #View()
+  dplyr::mutate(prop = n / sum(n)) %>% #View()
+  #mutate(topprop = n / cumsum(n)) %>%
+  dplyr::mutate(topprop = cumsum(prop)) %>% 
+  dplyr::mutate(botprop = if(length(prop) < 2) botprop = 0 else c(0, topprop[1:length(prop)-1])) %>% #View()
+  #.[1:79,] %>% # -> fart
+  #dplyr::mutate(label = paste(Sample, "::", Mineralogy)) %>% View()
+  dplyr::mutate(Sample.Sample = Sample.Name.N) %>% #-> fart
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N)) %>% glimpse()
+  dplyr::ungroup() %>% #glimpse()
+  dplyr::full_join(pyMin, by = c("Sample.Name.N" = "Sample.Sample.Name.N")) %>% #View() #, by = c("Sample.Name.N" = "Sample.Sample")) %>% View()
+  #View() %>%
+  dplyr::filter(Sample.Name.N %in% c("MiB1 Spodosol - Bulk", "MiB1 Spodosol")) %>% #View()
+  dplyr::full_join(longEa, by = c("Sample.Name.N" = "Sample")) %>% #glimpse()
+  dplyr::mutate(Sample.Name.N = factor(Sample.Name.N,
+                                       levels = c("Quartz", 
+                                                  "Int. PM + SRO", "Felsic PM + Mixed Clay", "Mafic PM + CO",
+                                                  "SRO", "CO + 1:1 Clay", 
+                                                  "2:1 Clay + CO", "Mixed Clay + Quartz", "1:1 Clay + Quartz"),
+                                       ordered = TRUE)) %>% #View()
+  dplyr::group_by(Sample.Name.N) %>% 
+  dplyr::mutate(P = ifelse(P < 0, 0, P)) %>% #View()
+  #dplyr::mutate(P = P / sum(P, na.rm = FALSE)) %>%# View()
+  #dplyr::mutate(botprop = botprop * max(P, na.rm = TRUE)) %>% 
+  #dplyr::mutate(topprop = topprop * max(P, na.rm = TRUE)) %>% 
+  
+  ungroup() %>% #View()
+  ggplot(aes(y = prop, xmin = E_lower, xmax = E_upper, ymin = botprop, ymax = topprop, fill = Origin, color = Origin)) +
+  xlab('Activation energy (kJ / mol)') + coord_cartesian(xlim = c(113, 204)) +
+  #geom_rect(position = 'fill', alpha = 0.5) +
+  #geom_rect(fill = NA, position = 'fill', size = 1, color = 'grey85', alpha = 0.5) +
+  geom_rect(position = 'fill', color = 'NA') +
+  geom_line(aes(x = E, y = P), color = 'black') +
+  theme_bw() +
+  theme(strip.text.x = element_text(size=12, face = "bold"),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 13),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 11),
+        legend.title = element_text(size = 12),
+        legend.position = "bottom",
+        strip.background = element_blank()) +
+  guides(fill=guide_legend(ncol=2)) +
+  #geom_line(data = longtherm, mapping = aes(x = temp, y = norm, color = Sample)) +
+  scale_fill_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  scale_color_manual(values = c(brewer_pal(palette = "RdYlBu")(7), 'grey')) +
+  #scale_color_manual(values = c(brewer_pal(palette = "Set2")(7), 'grey')) +
+  #scale_fill_brewer(palette = "Greens") + scale_color_brewer(palette = "Greens") + 
+  ylab("Proportion of Thermal Fraction C Release") +
+  facet_wrap(~Sample.Name.N, ncol = 1) +
+  #scale_y_continuous(breaks = c(0, 0.5, 1.0)) +
+  scale_y_continuous(
+    breaks = c(0, 0.5, 1.0),
+    #trans = scales::trans_new("scale",function(x) {~ . / max(.)}, inverse = function(x) {~ . / max(.)}),
+    #labels = number_format(scale = 0.001),
+    sec.axis = sec_axis(#trans = ~ . / sum(.),
+                        trans = ~ . / sum(.),
+                        breaks = c(0, 0.001, 0.002),
+                        name = "Density")
+  ) +
+  scale_x_continuous(breaks = c(seq(115, 215, by = 10))) 
+
+```
+
+
+
